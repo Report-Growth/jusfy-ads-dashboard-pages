@@ -55,7 +55,8 @@ function metaCreativeFilteredAds(id, rawRows, realMap) {
   let rows = rawRows;
   if (selectedCamps.size)  rows = rows.filter(r => selectedCamps.has(r.campaign_name));
   if (selectedAdsets.size) rows = rows.filter(r => selectedAdsets.has(r.adset_name));
-  return mergeCreativeRealConversions(aggMetaByAd(rows), realMap);
+  const isFiltered = selectedCamps.size > 0 || selectedAdsets.size > 0;
+  return mergeCreativeRealConversions(aggMetaByAd(rows), realMap, isFiltered);
 }
 
 function renderMetaCreativeSubtab(id, rawRows, realMap) {

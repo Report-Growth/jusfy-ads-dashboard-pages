@@ -11,7 +11,8 @@ function aggMetaByAd(rows) {
       adset_name:r.adset_name, status:r.status, thumbnail_url:r.thumbnail_url,
       permalink_url:r.permalink_url||null,
       spend:0, reach:0, impressions:0, clicks:0, conversions:0,
-      thruplay:0, video_p25:0, video_p50:0, video_p75:0, video_p100:0
+      thruplay:0, video_p25:0, video_p50:0, video_p75:0, video_p100:0,
+      _adsets: new Set(),
     };
     const a = m[key];
     a.spend       += +r.spend||0;
@@ -24,6 +25,7 @@ function aggMetaByAd(rows) {
     a.video_p50   += +r.video_p50||0;
     a.video_p75   += +r.video_p75||0;
     a.video_p100  += +r.video_p100||0;
+    if (r.adset_name) a._adsets.add(r.adset_name);
     if (r.thumbnail_url && !a.thumbnail_url) a.thumbnail_url = r.thumbnail_url;
     if (r.permalink_url && !a.permalink_url) a.permalink_url = r.permalink_url;
     if (r.status && r.status !== 'UNKNOWN') a.status = r.status;

@@ -130,13 +130,30 @@ function buildCreativeConversionsMap(rows) {
 
 // Substitui ad.conversions (número reportado pela plataforma) pelos cadastros reais do Metabase,
 // somados por criativo. Guarda o detalhe por conjunto em ad.adsetBreakdown para exibição secundária.
-function mergeCreativeRealConversions(ads, realMap) {
+//
+// `restrictToAdsets` (default false, mantém o comportamento histórico): quando true, o chamador está
+// filtrando por campanha/conjunto (ad._adsets, montado em aggMetaByAd a partir dos conjuntos que
+// sobraram no filtro), e a soma passa a respeitar só esses conjuntos — senão o total do criativo
+// ficava sempre o mesmo mesmo filtrando por conjunto (gasto/cliques mudavam, cadastros reais não),
+// porque real.total é a soma de TODOS os conjuntos onde o criativo já rodou. Sem filtro nenhum,
+// continua usando real.total/real.byAdset direto — restringir por _adsets também nesse caso
+// subestimaria o total sempre que um conjunto tiver cadastro real no Metabase mas nenhuma linha de
+// gasto sincronizada no período (ex: sync de criativos atrasado).
+function mergeCreativeRealConversions(ads, realMap, restrictToAdsets) {
   return ads.map(ad => {
     const real = realMap[ad.ad_name];
+    if (!real) return { ...ad, conversions: 0, adsetBreakdown: null };
+
+    const scoped = restrictToAdsets && ad._adsets && ad._adsets.size > 0;
+    const entries = scoped
+      ? Object.entries(real.byAdset).filter(([adset]) => ad._adsets.has(adset))
+      : Object.entries(real.byAdset);
+    const conversions = entries.reduce((s, [, n]) => s + n, 0);
+
     return {
       ...ad,
-      conversions: real ? real.total : 0,
-      adsetBreakdown: real ? real.byAdset : null,
+      conversions,
+      adsetBreakdown: entries.length ? Object.fromEntries(entries) : null,
     };
   });
 }
