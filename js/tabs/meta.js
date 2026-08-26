@@ -163,6 +163,7 @@ function renderMetaCampanhas() {
     <div class="table-wrap"><table>
       <thead><tr id="m-thead"></tr></thead>
       <tbody id="m-tbody"></tbody>
+      <tfoot><tr id="m-tfoot" style="border-top:2px solid #E7E8EC;background:#ffffff"></tr></tfoot>
     </table></div>
   </div>`;
 
@@ -181,6 +182,10 @@ function renderMetaTable() {
   const filtered = sortRows(filtered0, st.key, st.dir);
 
   const totSpend = sum(filtered,'spend'), totClicks=sum(filtered,'clicks'), totConv=sum(filtered,'conversions');
+  const totImpr = sum(filtered,'impressions'), totSessions = sum(filtered,'sessions');
+  const totCTR = totImpr>0 ? totClicks/totImpr*100 : 0;
+  const totTx  = totSessions>0 ? totConv/totSessions*100 : 0;
+  const totCac = totConv>0 ? totSpend/totConv : null;
   const cTotSpend = cmpFiltered.length ? sum(cmpFiltered,'spend')       : undefined;
   const cTotClick = cmpFiltered.length ? sum(cmpFiltered,'clicks')      : undefined;
   const cTotConv  = cmpFiltered.length ? sum(cmpFiltered,'conversions') : undefined;
@@ -216,6 +221,20 @@ function renderMetaTable() {
       ${hasCmp?`<td class="r">${cmp?deltaHtml(r.spend,cmp.spend):'<span class="d-neu">novo</span>'}</td>`:''}
     </tr>`;
   }).join('') : emptyRow(hasCmp ? 11 : 10);
+
+  document.getElementById('m-tfoot').innerHTML = filtered.length ? `
+    <td></td>
+    <td><strong>Total</strong></td>
+    <td class="r c-brand"><strong>${fR(totSpend)}</strong></td>
+    <td class="r"><strong>${fN(totImpr)}</strong></td>
+    <td class="r"><strong>${fN(totClicks)}</strong></td>
+    <td class="r"><strong>${fN(totSessions)}</strong></td>
+    <td class="r"><strong>${fP(totCTR)}</strong></td>
+    <td class="r"><strong>${fP(totTx)}</strong></td>
+    <td class="r"><strong>${fN(totConv)}</strong></td>
+    <td class="r c-brand"><strong>${totCac!=null?fR(totCac):'—'}</strong></td>
+    ${hasCmp?'<td></td>':''}
+  ` : '';
 }
 
 async function tabMeta() {

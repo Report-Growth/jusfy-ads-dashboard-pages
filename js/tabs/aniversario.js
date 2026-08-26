@@ -208,6 +208,14 @@ function metaTable(ads, title, campaignBadge, tableId) {
   });
   const st     = getSort(tableId, 'spend', 'desc');
   const sorted = sortRows(withMetrics, st.key, st.dir);
+  const totSpend = sum(sorted,'spend'), totReach = sum(sorted,'reach'), totImpr = sum(sorted,'impressions');
+  const totThru  = sum(sorted,'thruplay'), totP25 = sum(sorted,'video_p25'), totP50 = sum(sorted,'video_p50');
+  const totConv  = sum(sorted,'conversions');
+  const totFreq  = totReach>0 ? totImpr/totReach : 0;
+  const totTpRate  = totImpr>0 ? totThru/totImpr*100 : 0;
+  const totP25Rate = totImpr>0 ? totP25/totImpr*100  : 0;
+  const totP50Rate = totImpr>0 ? totP50/totImpr*100  : 0;
+  const totCpt   = totThru>0 ? totSpend/totThru : null;
   let rows = '';
   for (const ad of sorted) {
     const tpRate  = ad.tpRate, p50Rate = ad.p50Rate, p25Rate = ad.p25Rate, cpt = ad.cpt;
@@ -242,7 +250,20 @@ function metaTable(ads, title, campaignBadge, tableId) {
     + sortTh(tableId,'ThruPlay','thruplay') + sortTh(tableId,'Custo/ThruPlay','cpt')
     + '<th>Retenção</th>' + sortTh(tableId,'Views 25%','video_p25') + sortTh(tableId,'Views 50%','video_p50')
     + sortTh(tableId,'Cadastros Reais','conversions')
-    + '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+    + '</tr></thead><tbody>' + rows + '</tbody>'
+    + '<tfoot><tr style="border-top:2px solid #E7E8EC;background:#ffffff">'
+    + '<td></td><td><strong>Total</strong></td><td></td>'
+    + '<td class="r"><strong>' + fR(totSpend) + '</strong></td>'
+    + '<td class="r"><strong>' + fN(totReach) + '</strong></td>'
+    + '<td class="r"><strong>' + fN(totImpr) + '</strong></td>'
+    + '<td class="r"><strong>' + totFreq.toFixed(2) + 'x</strong></td>'
+    + '<td class="r c-green"><strong>' + fN(totThru) + '</strong><br><span style="font-size:10px;color:#212121BF">' + totTpRate.toFixed(1) + '%</span></td>'
+    + '<td class="r"><strong>' + (totCpt!==null?fR(totCpt):'—') + '</strong></td>'
+    + '<td></td>'
+    + '<td class="r"><strong>' + fN(totP25) + '</strong><br><span style="font-size:10px;color:#212121BF">' + totP25Rate.toFixed(1) + '%</span></td>'
+    + '<td class="r"><strong>' + fN(totP50) + '</strong><br><span style="font-size:10px;color:#212121BF">' + totP50Rate.toFixed(1) + '%</span></td>'
+    + '<td class="r"><strong>' + fN(totConv) + '</strong></td>'
+    + '</tr></tfoot></table></div></div>';
 }
 
 // Formata a quebra por conjunto de anúncios (adsetBreakdown: {adset_name: cadastros}) como texto
@@ -268,6 +289,10 @@ function metaFundoTable(ads, title, campaignBadge, tableId) {
   });
   const st     = getSort(tableId, 'spend', 'desc');
   const sorted = sortRows(withMetrics, st.key, st.dir);
+  const totSpend = sum(sorted,'spend'), totClicks = sum(sorted,'clicks'), totImpr = sum(sorted,'impressions');
+  const totConv  = sum(sorted,'conversions');
+  const totCtr   = totImpr>0 ? totClicks/totImpr*100 : 0;
+  const totCpa   = totConv>0 ? totSpend/totConv : null;
   let rows = '';
   for (const ad of sorted) {
     const ctr = ad.ctr, cpa = ad.cpa;
@@ -298,7 +323,17 @@ function metaFundoTable(ads, title, campaignBadge, tableId) {
     + sortTh(tableId,'Gasto','spend') + sortTh(tableId,'Cliques','clicks') + sortTh(tableId,'Impressões','impressions')
     + sortTh(tableId,'Frequência','freq')
     + sortTh(tableId,'CTR','ctr') + sortTh(tableId,'Cadastros Reais','conversions') + sortTh(tableId,'CAC Real','cpa')
-    + '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+    + '</tr></thead><tbody>' + rows + '</tbody>'
+    + '<tfoot><tr style="border-top:2px solid #E7E8EC;background:#ffffff">'
+    + '<td></td><td><strong>Total</strong></td><td></td>'
+    + '<td class="r c-brand"><strong>' + fR(totSpend) + '</strong></td>'
+    + '<td class="r"><strong>' + fN(totClicks) + '</strong></td>'
+    + '<td class="r c-muted"><strong>' + fN(totImpr) + '</strong></td>'
+    + '<td></td>'
+    + '<td class="r"><strong>' + fP(totCtr) + '</strong></td>'
+    + '<td class="r"><strong>' + fN(totConv) + '</strong></td>'
+    + '<td class="r"><strong>' + (totCpa!==null?fR(totCpa):'—') + '</strong></td>'
+    + '</tr></tfoot></table></div></div>';
 }
 
 function googleTable(ads, tableId) {

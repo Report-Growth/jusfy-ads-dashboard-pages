@@ -55,11 +55,11 @@ function applyFilter() {
 const TABS = [
   // {id:'geral',        label:'📊 Visão Geral'}, // oculta a pedido do usuário (17/07/2026) — dados migrando pro Diário
   {id:'diario',       label:'📅 Diário'},
-  {id:'aniversario',  label:'🎂 Aniversário'},
+  // {id:'aniversario',  label:'🎂 Aniversário'}, // oculta a pedido do usuário (26/08/2026)
   {id:'google',       label:'🔵 Google Ads'},
   {id:'meta',         label:'🟡 Meta Ads'},
   {id:'bing',         label:'🟢 Bing Ads'},
-  {id:'mexico',       label:'🇲🇽 México'},
+  // {id:'mexico',       label:'🇲🇽 México'}, // oculta a pedido do usuário (26/08/2026)
   {id:'instagram',    label:'📸 Instagram Orgânico'},
   {id:'seo',          label:'🔍 Busca Orgânica'},
   {id:'lp',           label:'🎯 LPs'},

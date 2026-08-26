@@ -10,8 +10,10 @@ function renderKeywordTable(rows, tableId, platformLabel) {
 
   const st     = getSort(tableId, 'cadastros', 'desc');
   const sorted = sortRows(rows, st.key, st.dir);
-  const totSpend = rows.reduce((s,r)=>s+(r.spend||0),0);
-  const totCad   = rows.reduce((s,r)=>s+(r.cadastros||0),0);
+  const totSpend  = rows.reduce((s,r)=>s+(r.spend||0),0);
+  const totCad    = rows.reduce((s,r)=>s+(r.cadastros||0),0);
+  const totClicks = rows.reduce((s,r)=>s+(r.clicks||0),0);
+  const totCpa    = totCad>0 ? totSpend/totCad : null;
   const semGasto = rows.filter(r=>r.spend==null).length;
 
   const bodyRows = sorted.map(r => {
@@ -46,6 +48,13 @@ function renderKeywordTable(rows, tableId, platformLabel) {
         ${sortTh(tableId,'CAC Real','cpa')}
       </tr></thead>
       <tbody>${bodyRows}</tbody>
+      <tfoot><tr style="border-top:2px solid #E7E8EC;background:#ffffff">
+        <td colspan="3"><strong>Total</strong></td>
+        <td class="r"><strong>${fN(totClicks)}</strong></td>
+        <td class="r c-brand"><strong>${fR(totSpend)}</strong></td>
+        <td class="r"><strong>${fN(totCad)}</strong></td>
+        <td class="r"><strong>${totCpa!=null?fR(totCpa):'—'}</strong></td>
+      </tr></tfoot>
     </table></div>
   </div>`;
 }
