@@ -67,6 +67,7 @@ function spendByDate(campRows, channelFilter, categoryFilter) {
     if (channelFilter === 'Google Ads' && r.platform !== 'google_ads') continue;
     if (channelFilter === 'Meta Ads'   && r.platform !== 'meta')       continue;
     if (channelFilter === 'Bing Ads'   && r.platform !== 'bing_ads')   continue;
+    if (channelFilter === 'TikTok Ads' && r.platform !== 'tiktok_ads') continue;
     if (categoryFilter && campaignCategory(r.campaign_name) !== categoryFilter) continue;
     if (!m[r.date]) m[r.date] = 0;
     m[r.date] += +r.spend || 0;
@@ -96,7 +97,7 @@ function sessionsByDate(rows) {
 // aba (canal/categoria/dia da semana). Se o canal selecionado não é a plataforma, retorna 0 (mantém
 // soma das 3 plataformas == Investimento Total, igual acontece em spendByDate).
 function platformSpendTotal(campRows, platform, channelFilter, categoryFilter, weekdaySet) {
-  const label = platform === 'google_ads' ? 'Google Ads' : platform === 'meta' ? 'Meta Ads' : 'Bing Ads';
+  const label = platform === 'google_ads' ? 'Google Ads' : platform === 'meta' ? 'Meta Ads' : platform === 'bing_ads' ? 'Bing Ads' : 'TikTok Ads';
   if (channelFilter && channelFilter !== label) return 0;
   let s = 0;
   for (const r of campRows) {
@@ -115,6 +116,7 @@ function clicksImprTotals(campRows, channelFilter, categoryFilter, weekdaySet) {
     if (channelFilter === 'Google Ads' && r.platform !== 'google_ads') continue;
     if (channelFilter === 'Meta Ads'   && r.platform !== 'meta')       continue;
     if (channelFilter === 'Bing Ads'   && r.platform !== 'bing_ads')   continue;
+    if (channelFilter === 'TikTok Ads' && r.platform !== 'tiktok_ads') continue;
     if (categoryFilter && campaignCategory(r.campaign_name) !== categoryFilter) continue;
     if (weekdaySet && weekdaySet.size > 0 && !weekdaySet.has(weekdayOf(r.date))) continue;
     clicks += +r.clicks || 0;
@@ -214,12 +216,14 @@ function renderDiarioBody(filterChannel, filterCategory) {
   const gSpend  = platformSpendTotal(campsRaw, 'google_ads', _diarioChannelFilter, _diarioCategoryFilter, _diarioWeekdayFilter);
   const mSpend  = platformSpendTotal(campsRaw, 'meta',       _diarioChannelFilter, _diarioCategoryFilter, _diarioWeekdayFilter);
   const biSpend = platformSpendTotal(campsRaw, 'bing_ads',   _diarioChannelFilter, _diarioCategoryFilter, _diarioWeekdayFilter);
+  const ttSpend = platformSpendTotal(campsRaw, 'tiktok_ads', _diarioChannelFilter, _diarioCategoryFilter, _diarioWeekdayFilter);
   const { clicks: totClicks, impr: totImpr } = clicksImprTotals(campsRaw, _diarioChannelFilter, _diarioCategoryFilter, _diarioWeekdayFilter);
   const ctr = totImpr > 0 ? totClicks / totImpr * 100 : 0;
 
   const cGSpend  = hasCmp ? platformSpendTotal(cmpCampsRaw, 'google_ads', _diarioChannelFilter, _diarioCategoryFilter, null) : undefined;
   const cMSpend  = hasCmp ? platformSpendTotal(cmpCampsRaw, 'meta',       _diarioChannelFilter, _diarioCategoryFilter, null) : undefined;
   const cBiSpend = hasCmp ? platformSpendTotal(cmpCampsRaw, 'bing_ads',   _diarioChannelFilter, _diarioCategoryFilter, null) : undefined;
+  const cTtSpend = hasCmp ? platformSpendTotal(cmpCampsRaw, 'tiktok_ads', _diarioChannelFilter, _diarioCategoryFilter, null) : undefined;
 
   const chartSeries = buildDiarioChartSeries(rows);
 
@@ -237,6 +241,7 @@ function renderDiarioBody(filterChannel, filterCategory) {
         <option value="Google Ads" ${_diarioChannelFilter==='Google Ads'?'selected':''}>Google Ads</option>
         <option value="Meta Ads"   ${_diarioChannelFilter==='Meta Ads'?'selected':''}>Meta Ads</option>
         <option value="Bing Ads"   ${_diarioChannelFilter==='Bing Ads'?'selected':''}>Bing Ads</option>
+        <option value="TikTok Ads" ${_diarioChannelFilter==='TikTok Ads'?'selected':''}>TikTok Ads</option>
       </select>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
@@ -269,11 +274,12 @@ function renderDiarioBody(filterChannel, filterCategory) {
     </div>
   </div>
 
-  <div class="kpi-grid cols-4" style="margin-bottom:20px">
+  <div class="kpi-grid cols-5" style="margin-bottom:20px">
     ${kpiCard('Investimento Total', totSpend, cTotSpend, fR, 'c-brand')}
     ${kpiCard('Google Ads',         gSpend,   cGSpend,   fR, 'c-blue')}
     ${kpiCard('Meta Ads',           mSpend,   cMSpend,   fR, 'c-yellow')}
     ${kpiCard('Bing Ads',           biSpend,  cBiSpend,  fR, 'c-green')}
+    ${kpiCard('TikTok Ads',         ttSpend,  cTtSpend,  fR, 'c-red')}
   </div>
   <div class="kpi-grid cols-4" style="margin-bottom:20px">
     ${kpiCard('Sessões (GA4)',    totSess, cTotSess, fN, 'c-green')}

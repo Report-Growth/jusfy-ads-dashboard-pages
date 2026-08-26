@@ -5,6 +5,7 @@ const PLATFORM_REFERRAL_PATTERNS = {
   google_ads: /google|adwords/i,
   meta:       /meta|fb|facebook|v4facebookads/i,
   bing_ads:   /bing/i,
+  tiktok_ads: /tiktok|ttclid/i,
 };
 
 // Vocabulário de features conhecidas nos nomes de campanha (ex: google_nonbrand_vendas_search_<feature>).
@@ -31,6 +32,7 @@ function buildCampaignLookup(campaignRows) {
     google_ads: { names: new Set(), ids: new Set() },
     meta:       { names: new Set(), ids: new Set() },
     bing_ads:   { names: new Set(), ids: new Set() },
+    tiktok_ads: { names: new Set(), ids: new Set() },
   };
   for (const r of campaignRows||[]) {
     const bucket = lookup[r.platform];
@@ -42,7 +44,7 @@ function buildCampaignLookup(campaignRows) {
 }
 
 // label 'Google Ads'/'Meta Ads'/'Bing Ads' -> chave de PLATFORM_REFERRAL_PATTERNS
-const PLATFORM_LABEL_TO_KEY = { 'Google Ads': 'google_ads', 'Meta Ads': 'meta', 'Bing Ads': 'bing_ads' };
+const PLATFORM_LABEL_TO_KEY = { 'Google Ads': 'google_ads', 'Meta Ads': 'meta', 'Bing Ads': 'bing_ads', 'TikTok Ads': 'tiktok_ads' };
 
 // Resolve um utm_campaign pra 'Google Ads'/'Meta Ads'/'Bing Ads' usando o lookup acima — por nome
 // exato, campaign_id exato, ou feature keyword compartilhada com alguma campanha real daquela
@@ -58,6 +60,7 @@ function resolveAdPlatformForUtm(utm, lookup, referral) {
   if (lookup.google_ads.names.has(val) || lookup.google_ads.ids.has(val)) exactMatches.push('Google Ads');
   if (lookup.meta.names.has(val)       || lookup.meta.ids.has(val))       exactMatches.push('Meta Ads');
   if (lookup.bing_ads.names.has(val)   || lookup.bing_ads.ids.has(val))   exactMatches.push('Bing Ads');
+  if (lookup.tiktok_ads.names.has(val) || lookup.tiktok_ads.ids.has(val)) exactMatches.push('TikTok Ads');
 
   if (exactMatches.length === 1) return exactMatches[0];
   if (exactMatches.length > 1) {
@@ -94,6 +97,7 @@ function classifyRealConversionChannel(row, campaignLookup) {
   if (PLATFORM_REFERRAL_PATTERNS.google_ads.test(referral)) return 'Google Ads';
   if (PLATFORM_REFERRAL_PATTERNS.meta.test(referral))       return 'Meta Ads';
   if (PLATFORM_REFERRAL_PATTERNS.bing_ads.test(referral))   return 'Bing Ads';
+  if (PLATFORM_REFERRAL_PATTERNS.tiktok_ads.test(referral)) return 'TikTok Ads';
   if (CONTENT_CATEGORIES.includes(row.marketing_category))  return row.marketing_category;
   return 'Outros';
 }
