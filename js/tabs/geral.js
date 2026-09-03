@@ -18,9 +18,9 @@
 // plano, mesma nota do Relatório Diário). O card/KPI "Meta do Mês" e o % de alcance usam sempre
 // `_total` (nunca a soma dos canais), pra bater com o número que o time já vê no relatório do Slack.
 const GERAL_METAS_MES = {
-  '2026-07': { 'Google Non-brand':4644, 'Google Brand':1632, 'Meta':365, 'Bing':325, 'Afiliados':64,  'Orgânico':2863, 'Outros':107,  _total:10000 },
-  '2026-08': { 'Google Non-brand':2955, 'Google Brand':1732, 'Meta':749, 'Bing':369, 'Afiliados':396, 'Orgânico':2848, 'Outros':951,  _total:10000 },
-  '2026-09': { 'Google Non-brand':2535, 'Google Brand':1773, 'Meta':776, 'Bing':374, 'Afiliados':540, 'Orgânico':3050, 'Outros':1026, _total:10000 },
+  '2026-07': { 'Google Non-brand':4644, 'Google Brand':1632, 'Meta':365, 'Bing':325, 'Afiliados/Influenciadores':64,  'Orgânico':2863, 'Outros':107,  _total:10000 },
+  '2026-08': { 'Google Non-brand':2955, 'Google Brand':1732, 'Meta':749, 'Bing':369, 'Afiliados/Influenciadores':396, 'Orgânico':2848, 'Outros':951,  _total:10000 },
+  '2026-09': { 'Google Non-brand':2535, 'Google Brand':1773, 'Meta':776, 'Bing':374, 'Afiliados/Influenciadores':540, 'Orgânico':3050, 'Outros':1026, _total:10000 },
 };
 
 // ── Feriados nacionais + SP (mesma lista do Relatório Diário de Aquisição) — usados só pra
@@ -38,18 +38,19 @@ const geralDiaNaoUtil = dateStr => { const wd = geralWeekday(dateStr); return wd
 // ── Cores por canal (reaproveita as cores de marca já usadas no resto do dashboard) ──
 const GERAL_CANAL_COLOR = {
   'Google Non-brand':'#0182ab', 'Google Brand':'#045c74', 'Meta':'#ed723e', 'Bing':'#9551FB',
-  'TikTok':'#EE1D52', 'Orgânico':'#02A378', 'Afiliados':'#41C78F', 'Outros':'#CECED2',
+  'TikTok':'#EE1D52', 'Orgânico':'#02A378', 'Afiliados/Influenciadores':'#41C78F', 'Outros':'#CECED2',
 };
-const GERAL_CANAIS_GOALS = ['Google Non-brand','Google Brand','Meta','Bing','Afiliados','Orgânico','Outros']; // ordem da tabela de metas
+const GERAL_CANAIS_GOALS = ['Google Non-brand','Google Brand','Meta','Bing','Afiliados/Influenciadores','Orgânico','Outros']; // ordem da tabela de metas
 
 // Classifica uma linha de cadastro real (jusfy_conversions_daily) num dos 8 "canais" desta aba —
 // reaproveita classifyRealConversionChannel (mesma função usada no Diário/Google/Meta/Bing, já
-// trata referral errado via utm_campaign+campaignLookup) e só adiciona a quebra Brand/Non-brand
-// do Google (mesma regra do Relatório Diário: marketing_category='Brand Search') e o bucket
-// "Afiliados" (que a função de canal já joga em "Outros" por não ter padrão de referral próprio).
+// trata referral errado via utm_campaign+campaignLookup, e já resolve "Afiliados/Influenciadores"
+// direto — tanto pela categoria do Metabase quanto pela campanha paga do Meta Ads, ver
+// AFILIADOS_CAMPAIGN_NAMES em conversions-match.js) e só adiciona a quebra Brand/Non-brand do
+// Google (mesma regra do Relatório Diário: marketing_category='Brand Search').
 function geralCanalBucket(row, campaignLookup) {
-  if ((row.marketing_category||'').trim().toLowerCase() === 'afiliados') return 'Afiliados';
   const ch = classifyRealConversionChannel(row, campaignLookup);
+  if (ch === 'Afiliados/Influenciadores') return ch;
   if (ch === 'Google Ads') return row.marketing_category === 'Brand Search' ? 'Google Brand' : 'Google Non-brand';
   if (ch === 'Meta Ads') return 'Meta';
   if (ch === 'Bing Ads') return 'Bing';
@@ -64,25 +65,29 @@ function geralGoalsBucket(canalBucket) {
   return canalBucket === 'TikTok' ? 'Outros' : canalBucket;
 }
 
-// Classifica pela categoria de marketing crua (Non brand / Brand Search / Orgânico / Afiliados-
-// Social) — dimensão diferente do canal: aqui não importa a plataforma, só o tipo de tráfego.
+// Classifica pela categoria de marketing crua (Non brand / Brand Search / Orgânico /
+// Afiliados/Influenciadores/Social) — dimensão diferente do canal: aqui não importa a plataforma,
+// só o tipo de tráfego.
 function geralCategoriaBucket(row) {
   const mc = (row.marketing_category||'').trim().toLowerCase();
   if (mc === 'non brand') return 'Non brand';
   if (mc === 'brand search') return 'Brand Search';
   if (mc === 'orgânico' || mc === 'organico' || mc === 'chatgpt') return 'Orgânico';
-  if (mc === 'afiliados' || mc === 'social' || mc === 'comunidade' || mc === 'crm') return 'Afiliados/Social';
+  if (mc === 'afiliados' || mc === 'social' || mc === 'comunidade' || mc === 'crm') return 'Afiliados/Influenciadores/Social';
   return 'Outros';
 }
 
 // Gasto de campaign_daily agrupado pelos mesmos buckets de canal (só as 4 plataformas pagas têm
-// gasto rastreável — Orgânico/Afiliados/Outros ficam sem gasto, "—" na tabela).
+// gasto rastreável — Orgânico/Outros ficam sem gasto, "—" na tabela). A campanha de
+// afiliados/influenciadores (platform='meta', ver AFILIADOS_CAMPAIGN_NAMES) sai do bucket "Meta" e
+// vira gasto próprio, senão o CAC de Meta ficava inflado e o de Afiliados/Influenciadores sempre "—".
 function geralSpendByCanal(campsRaw, start, end) {
   const m = {};
   for (const r of campsRaw) {
     if (r.date < start || r.date > end) continue;
     let canal = null;
-    if (r.platform === 'google_ads') canal = campaignCategory(r.campaign_name) === 'Brand Search' ? 'Google Brand' : 'Google Non-brand';
+    if (r.platform === 'meta' && isAfiliadosCampaign(r.campaign_name)) canal = 'Afiliados/Influenciadores';
+    else if (r.platform === 'google_ads') canal = campaignCategory(r.campaign_name) === 'Brand Search' ? 'Google Brand' : 'Google Non-brand';
     else if (r.platform === 'meta')       canal = 'Meta';
     else if (r.platform === 'bing_ads')   canal = 'Bing';
     else if (r.platform === 'tiktok_ads') canal = 'TikTok';
@@ -320,7 +325,7 @@ function geralRenderCanal(data) {
 function geralRenderCategoria(data) {
   const { categoriaRows, hasCmp, cmpByCategoria } = data;
   const total = categoriaRows.reduce((s,r)=>s+r.cadastros,0);
-  const order = ['Non brand','Brand Search','Orgânico','Afiliados/Social','Outros'];
+  const order = ['Non brand','Brand Search','Orgânico','Afiliados/Influenciadores/Social','Outros'];
   const sorted = order.map(c => categoriaRows.find(r=>r.categoria===c) || {categoria:c, cadastros:0}).filter(r=>r.cadastros>0);
   return `
   <div class="card" style="margin-bottom:16px">

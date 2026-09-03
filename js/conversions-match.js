@@ -23,6 +23,15 @@ const FEATURE_KEYWORDS = [
 // ads, então não fazem sentido cair em "Outros" quando existe um rótulo mais específico.
 const CONTENT_CATEGORIES = ['Social', 'Comunidade', 'CRM', 'ChatGPT'];
 
+// Campanha(s) do Meta Ads que remuneram afiliados/influenciadores por indicação (comissão), não
+// leilão de mídia tradicional — a pedido do usuário em 03/09/2026, separadas do resto do Meta Ads
+// em qualquer lugar que usa classifyRealConversionChannel (Diário, Meta Ads, Visão Geral), com aba
+// própria (ver js/tabs/afiliados.js). "Afiliados/Influenciadores" é o nome padrão do canal a partir
+// de agora — troca o "Afiliados" solto usado antes só na Visão Geral. Nome(s) exatos como cadastrados
+// no Meta Ads (campaign_name, platform='meta').
+const AFILIADOS_CAMPAIGN_NAMES = new Set(['meta_leads_fundo_afiliados']);
+const isAfiliadosCampaign = campaignName => AFILIADOS_CAMPAIGN_NAMES.has((campaignName||'').trim().toLowerCase());
+
 // Monta um índice (por plataforma) de nomes de campanha + campaign_id, a partir de linhas cruas de
 // campaign_daily (com campaign_id — get_camp_agg não tem esse campo, por isso pedimos fetchCamps).
 // Usado pra corrigir casos em que o Metabase gravou o referral errado (Affiliate/Others) mas o
@@ -88,6 +97,13 @@ function resolveAdPlatformForUtm(utm, lookup, referral) {
 // errado (Affiliate/Others em cadastros que na verdade vieram de uma campanha paga). Sem lookup,
 // cai no referral; o que sobrar vira Orgânico, uma categoria de conteúdo conhecida, ou Outros.
 function classifyRealConversionChannel(row, campaignLookup) {
+  // "Afiliados/Influenciadores" tem duas fontes: a categoria que o próprio Metabase já marca
+  // (indicação fora do Meta Ads) e o utm_campaign batendo exatamente com a campanha paga de
+  // afiliados no Meta Ads (ver AFILIADOS_CAMPAIGN_NAMES) — sem esse segundo check, essa campanha
+  // caía dentro de "Meta Ads" e inflava o CAC/desempenho da mídia paga tradicional.
+  if ((row.marketing_category||'').trim().toLowerCase() === 'afiliados') return 'Afiliados/Influenciadores';
+  if (isAfiliadosCampaign(row.utm_campaign)) return 'Afiliados/Influenciadores';
+
   const resolved = resolveAdPlatformForUtm(row.utm_campaign, campaignLookup, row.referral);
   if (resolved) return resolved;
 

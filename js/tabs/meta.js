@@ -88,8 +88,12 @@ async function switchMetaSubTab(id) {
   if (cached && cached.start === S.start && cached.end === S.end) {
     ({ rawRows, realMap } = cached);
   } else {
+    // Exclui a(s) campanha(s) de afiliados/influenciadores (aba própria, ver afiliados.js) — sem
+    // isso, "meta_leads_fundo_afiliados" aparecia dentro de "Criativos Fundo" por conter "fundo"
+    // no nome, misturando criativos de comissão por indicação com os de mídia paga tradicional.
+    const afExclude = [...AFILIADOS_CAMPAIGN_NAMES].map(n => `campaign_name=neq.${encodeURIComponent(n)}`).join('&');
     const [rows, realRows] = await Promise.all([
-      supa(`meta_creatives?select=*&date=gte.${S.start}&date=lte.${S.end}&campaign_name=ilike.*${id}*&order=date.asc`),
+      supa(`meta_creatives?select=*&date=gte.${S.start}&date=lte.${S.end}&campaign_name=ilike.*${id}*&${afExclude}&order=date.asc`),
       fetchCreativeRealConversions(S.start, S.end),
     ]);
     realMap = buildCreativeConversionsMap(realRows);
@@ -246,14 +250,13 @@ async function tabMeta() {
   msReset('metaCreativeCamp_fundo'); msReset('metaCreativeAdset_fundo');
   msReset('metaCreativeCamp_topo');  msReset('metaCreativeAdset_topo');
 
-  const [campAgg, cmpCampAgg, ga4Camp, cmpGA4Camp, convRows, cmpConvRows, dailyByPlatform, convDaily, campsRaw] = await Promise.all([
+  const [campAgg, cmpCampAgg, ga4Camp, cmpGA4Camp, convRows, cmpConvRows, convDaily, campsRaw] = await Promise.all([
     fetchCampAgg(S.start, S.end),
     S.compare && S.cmpStart ? fetchCampAgg(S.cmpStart, S.cmpEnd) : [],
     fetchGA4SessionsByCampaign(S.start, S.end),
     S.compare && S.cmpStart ? fetchGA4SessionsByCampaign(S.cmpStart, S.cmpEnd) : [],
     fetchJusfyConversionsByCampaign(S.start, S.end),
     S.compare && S.cmpStart ? fetchJusfyConversionsByCampaign(S.cmpStart, S.cmpEnd) : [],
-    fetchCampDailyByPlatform(S.start, S.end),
     fetchJusfyConversionsDailyAgg(S.start, S.end),
     fetchCamps(S.start, S.end),
   ]);
@@ -271,8 +274,12 @@ async function tabMeta() {
     };
   });
 
-  const aggRaw    = addMetrics(campAgg.filter(r=>r.platform==='meta'), sessMap);
-  const cmpAggRaw = cmpCampAgg.length ? addMetrics(cmpCampAgg.filter(r=>r.platform==='meta'), cmpSessMap) : [];
+  // Exclui a(s) campanha(s) de afiliados/influenciadores (comissão por indicação, aba própria em
+  // afiliados.js) — a pedido do usuário em 03/09/2026, pra não misturar custo/resultado desse canal
+  // com o desempenho de mídia paga tradicional do Meta Ads.
+  const isMetaAdsCamp = r => r.platform==='meta' && !isAfiliadosCampaign(r.campaign_name);
+  const aggRaw    = addMetrics(campAgg.filter(isMetaAdsCamp), sessMap);
+  const cmpAggRaw = cmpCampAgg.length ? addMetrics(cmpCampAgg.filter(isMetaAdsCamp), cmpSessMap) : [];
 
   // Substitui conversões/CPA de plataforma pelas conversões reais do Metabase (jusfy_conversions_daily)
   const agg    = mergeRealConversions(aggRaw, convRows, 'meta');
@@ -280,8 +287,10 @@ async function tabMeta() {
   const cmpMap = Object.fromEntries(cmpAgg.map(r=>[r.campaign_name,r]));
   const hasCmp = S.compare && cmpAgg.length > 0;
 
+  // Gasto diário vem de campsRaw (granular por campanha) em vez de get_camp_daily_by_platform —
+  // precisamos excluir a campanha de afiliados/influenciadores, e essa RPC só soma por plataforma.
   const spendByDate = {};
-  for (const r of dailyByPlatform) if (r.platform === 'meta') spendByDate[r.date] = (spendByDate[r.date]||0) + (+r.spend||0);
+  for (const r of campsRaw) if (isMetaAdsCamp(r)) spendByDate[r.date] = (spendByDate[r.date]||0) + (+r.spend||0);
   const campaignLookup = buildCampaignLookup(campsRaw);
   const channelConvMap = aggregateDailyRealConversionsByChannel(convDaily, campaignLookup);
   const dailyChart = buildComboChartSeries(S.start, S.end, spendByDate, channelConvMap, 'Meta Ads');
@@ -289,7 +298,7 @@ async function tabMeta() {
   // Mesma quebra diária, mas por grupo de campanha (não por canal) — usada quando o usuário
   // seleciona campanhas no multi-select, pra refazer o gráfico só com os grupos marcados.
   const { groupIdOf } = buildCampaignGroupIndex(aggRaw, 'meta');
-  const spendByGroupMap = dailySpendByGroup(campsRaw.filter(r => r.platform === 'meta'), groupIdOf);
+  const spendByGroupMap = dailySpendByGroup(campsRaw.filter(isMetaAdsCamp), groupIdOf);
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'meta');
   const allDates = Object.keys(spendByDate);
 
