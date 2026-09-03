@@ -13,10 +13,14 @@
 // ── Metas de cadastros por canal, plano Q3 2026 do usuário (não vem do Metabase — valor fixo
 // por mês). Usada só na seção "Previsão até o Fim do Mês". Atualizar aqui quando o usuário
 // compartilhar metas de meses novos (mesma tabela usada no Relatório Diário de Aquisição).
+// `_total`: total oficial do mês no plano do usuário — em julho/agosto bate exato com a soma dos
+// 7 canais (10.000), mas em setembro a soma fecha em 10.074 (diferença de 74 mantida como está no
+// plano, mesma nota do Relatório Diário). O card/KPI "Meta do Mês" e o % de alcance usam sempre
+// `_total` (nunca a soma dos canais), pra bater com o número que o time já vê no relatório do Slack.
 const GERAL_METAS_MES = {
-  '2026-07': { 'Google Non-brand':4644, 'Google Brand':1632, 'Meta':365, 'Bing':325, 'Afiliados':64,  'Orgânico':2863, 'Outros':107  },
-  '2026-08': { 'Google Non-brand':2955, 'Google Brand':1732, 'Meta':749, 'Bing':369, 'Afiliados':396, 'Orgânico':2848, 'Outros':951  },
-  '2026-09': { 'Google Non-brand':2535, 'Google Brand':1773, 'Meta':776, 'Bing':374, 'Afiliados':540, 'Orgânico':3050, 'Outros':1026 },
+  '2026-07': { 'Google Non-brand':4644, 'Google Brand':1632, 'Meta':365, 'Bing':325, 'Afiliados':64,  'Orgânico':2863, 'Outros':107,  _total:10000 },
+  '2026-08': { 'Google Non-brand':2955, 'Google Brand':1732, 'Meta':749, 'Bing':369, 'Afiliados':396, 'Orgânico':2848, 'Outros':951,  _total:10000 },
+  '2026-09': { 'Google Non-brand':2535, 'Google Brand':1773, 'Meta':776, 'Bing':374, 'Afiliados':540, 'Orgânico':3050, 'Outros':1026, _total:10000 },
 };
 
 // ── Feriados nacionais + SP (mesma lista do Relatório Diário de Aquisição) — usados só pra
@@ -91,14 +95,22 @@ function geralSpendByCanal(campsRaw, start, end) {
 // Datas-base usadas pra projetar `dateStr`: se é dia não-útil (fim de semana ou feriado), usa os
 // últimos 4 sábados + últimos 4 domingos (8 valores); senão, as últimas 4 ocorrências do mesmo
 // dia da semana, pulando datas que caiam em feriado (mesma regra do Relatório Diário).
-function geralBaselineDates(dateStr) {
+//
+// `cutoff` (obrigatório) = último dia com dado real (ontem). Sem isso, ao projetar um dia perto
+// do fim do mês, a busca por "últimos 4 sábados" ou "última mesma quinta-feira" podia encontrar
+// outro dia DENTRO do próprio período ainda não realizado (ex: projetando 06/09 achava 05/09 como
+// "sábado mais recente" — mas 05/09 também é um dia futuro, sem dado real, então entrava como 0 na
+// média e derrubava a projeção). Cada candidata só é aceita se for <= cutoff.
+function geralBaselineDates(dateStr, cutoff) {
   if (geralDiaNaoUtil(dateStr)) {
     const sats = [], suns = [];
     let cursor = addDays(new Date(dateStr+'T12:00:00'), -1), guard = 0;
-    while ((sats.length < 4 || suns.length < 4) && guard < 60) {
+    while ((sats.length < 4 || suns.length < 4) && guard < 120) {
       const wd = cursor.getDay(), ds = fmt(cursor);
-      if (wd === 6 && sats.length < 4) sats.push(ds);
-      if (wd === 0 && suns.length < 4) suns.push(ds);
+      if (ds <= cutoff) {
+        if (wd === 6 && sats.length < 4) sats.push(ds);
+        if (wd === 0 && suns.length < 4) suns.push(ds);
+      }
       cursor = addDays(cursor, -1);
       guard++;
     }
@@ -107,9 +119,9 @@ function geralBaselineDates(dateStr) {
   const wd = geralWeekday(dateStr);
   const dates = [];
   let cursor = addDays(new Date(dateStr+'T12:00:00'), -7), guard = 0;
-  while (dates.length < 4 && guard < 20) {
+  while (dates.length < 4 && guard < 40) {
     const ds = fmt(cursor);
-    if (cursor.getDay() === wd && !GERAL_FERIADOS.has(ds)) dates.push(ds);
+    if (cursor.getDay() === wd && !GERAL_FERIADOS.has(ds) && ds <= cutoff) dates.push(ds);
     cursor = addDays(cursor, -7);
     guard++;
   }
@@ -190,7 +202,10 @@ function geralRenderPrevisao(data) {
 
   const totRealizado = GERAL_CANAIS_GOALS.reduce((s,c)=>s+(realizadoByCanal[c]||0),0);
   const totPrevisto   = GERAL_CANAIS_GOALS.reduce((s,c)=>s+(previstoByCanal[c]||0),0);
-  const totMeta        = metas ? GERAL_CANAIS_GOALS.reduce((s,c)=>s+(metas[c]||0),0) : null;
+  // Meta do mês usa sempre o total oficial do plano (_total), não a soma dos canais — em setembro
+  // a soma dos 7 canais fecha em 10.074 mas o plano registra o mês como 10.000 (mesma diferença
+  // documentada no Relatório Diário).
+  const totMeta        = metas ? metas._total : null;
   const pctAlcance      = totMeta ? totRealizado/totMeta*100 : null;
 
   if (!metas) {
@@ -391,7 +406,7 @@ async function tabGeral() {
   }
   const previstoByCanal = { ...realizadoByCanal };
   for (let d = todayD; d <= monthEnd; d = fmt(addDays(new Date(d+'T12:00:00'), 1))) {
-    const baseDates = geralBaselineDates(d);
+    const baseDates = geralBaselineDates(d, yestD);
     for (const c of GERAL_CANAIS_GOALS) {
       const vals = baseDates.map(bd => (byDateCanal[bd] && byDateCanal[bd][c]) || 0);
       const avg = vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
