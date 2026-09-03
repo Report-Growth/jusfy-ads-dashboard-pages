@@ -236,10 +236,10 @@ function geralRenderPrevisao(data) {
         <div class="kpi-cmp">faltam ≈ ${fN(Math.max(0,totMeta-totPrevisto))} · ${pctMesDecorrido.toFixed(0)}% do mês decorrido</div>
       </div>
     </div>
-    <div class="section-note">Realizado e Previsto são cadastros reais (Metabase), projetados dia a dia por canal usando a média das últimas 4 ocorrências do mesmo dia da semana (pulando feriados). Barra e % do alcance = Previsto do canal ÷ meta do canal, largura limitada a 100%. Meta vem do plano Q3 do time — cor do % de alcance compara com 100% da meta (não com o ritmo do mês, já que o Previsto projeta o mês inteiro). "Outros" agrupa fontes do plano ainda sem rastreamento no Metabase (inclui TikTok Ads, por enquanto).</div>
+    <div class="section-note">Realizado e Previsto são cadastros reais (Metabase), projetados dia a dia por canal usando a média das últimas 4 ocorrências do mesmo dia da semana (pulando feriados). Barra abaixo = Realizado do canal ÷ meta do canal (ritmo até ontem), largura limitada a 100%. % do alcance (cards e tabela) = Previsto do canal ÷ meta do canal (projeção do mês inteiro), cor comparando com 100% da meta. "Outros" agrupa fontes do plano ainda sem rastreamento no Metabase (inclui TikTok Ads, por enquanto).</div>
     ${GERAL_CANAIS_GOALS.map(c => {
-      const prev = previstoByCanal[c]||0, meta = metas[c]||0;
-      const pct = meta>0 ? prev/meta*100 : 0;
+      const real = realizadoByCanal[c]||0, meta = metas[c]||0;
+      const pct = meta>0 ? real/meta*100 : 0;
       return `<div class="chbar-row">
         <div class="name">${c}</div>
         <div class="chbar-track"><div class="chbar-fill" style="width:${Math.min(100,pct)}%;background:${GERAL_CANAL_COLOR[c]}"></div></div>
