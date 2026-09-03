@@ -195,7 +195,9 @@ function geralRender7Dias(data) {
 // ── Seção 3: Previsão até o Fim do Mês — mês corrente fixo (não usa o filtro do topo), com
 // metas do plano Q3 por canal. Realizado = cadastros reais desde dia 1 do mês até ontem;
 // Previsto = Realizado + projeção dos dias restantes (baseline por dia da semana, ver
-// geralBaselineDates); % de alcance = Realizado ÷ Meta do mês.
+// geralBaselineDates); % de alcance = Previsto ÷ Meta do mês (a pedido do usuário em 03/09/2026 —
+// o Relatório Diário do Slack usa Realizado, mas aqui o time prefere ver a projeção do mês
+// inteiro batendo ou não com a meta, não só o ritmo parcial até ontem).
 function geralRenderPrevisao(data) {
   const { monthKey, monthLabel, realizadoByCanal, previstoByCanal, diasRestantes, pctMesDecorrido } = data;
   const metas = GERAL_METAS_MES[monthKey];
@@ -206,7 +208,7 @@ function geralRenderPrevisao(data) {
   // a soma dos 7 canais fecha em 10.074 mas o plano registra o mês como 10.000 (mesma diferença
   // documentada no Relatório Diário).
   const totMeta        = metas ? metas._total : null;
-  const pctAlcance      = totMeta ? totRealizado/totMeta*100 : null;
+  const pctAlcance      = totMeta ? totPrevisto/totMeta*100 : null;
 
   if (!metas) {
     return `
@@ -216,7 +218,11 @@ function geralRenderPrevisao(data) {
     </div>`;
   }
 
-  const pctCls = v => v==null ? '' : (v >= pctMesDecorrido ? 'c-green' : 'c-red');
+  // % de alcance usa o Previsto (projeção do mês inteiro), não o Realizado (parcial até ontem) —
+  // por isso a cor compara com 100% fixo, não com "% do mês decorrido" (esse corte só faz sentido
+  // pra comparar um número parcial contra o ritmo esperado até aqui; o Previsto já representa o
+  // mês inteiro, então "bateu a meta ou não" é sempre vs. 100%).
+  const pctCls = v => v==null ? '' : (v >= 100 ? 'c-green' : 'c-red');
 
   return `
   <div class="card" style="margin-bottom:16px">
@@ -227,13 +233,13 @@ function geralRenderPrevisao(data) {
       ${kpiCard('Meta do Mês', totMeta, undefined, fN, 'c-muted')}
       <div class="card"><div class="kpi-label">% do Alcance da Meta</div>
         <div class="kpi-value ${pctCls(pctAlcance)}">${fP(pctAlcance)}</div>
-        <div class="kpi-cmp">faltam ≈ ${fN(Math.max(0,totMeta-totRealizado))} · ${pctMesDecorrido.toFixed(0)}% do mês decorrido</div>
+        <div class="kpi-cmp">faltam ≈ ${fN(Math.max(0,totMeta-totPrevisto))} · ${pctMesDecorrido.toFixed(0)}% do mês decorrido</div>
       </div>
     </div>
-    <div class="section-note">Realizado e Previsto são cadastros reais (Metabase), projetados dia a dia por canal usando a média das últimas 4 ocorrências do mesmo dia da semana (pulando feriados). Barra e % do alcance = Realizado do canal ÷ meta do canal, largura limitada a 100%. Meta vem do plano Q3 do time — cor do % de alcance compara com o quanto do mês já passou (${pctMesDecorrido.toFixed(1)}%), não com 100% fixo. "Outros" agrupa fontes do plano ainda sem rastreamento no Metabase (inclui TikTok Ads, por enquanto).</div>
+    <div class="section-note">Realizado e Previsto são cadastros reais (Metabase), projetados dia a dia por canal usando a média das últimas 4 ocorrências do mesmo dia da semana (pulando feriados). Barra e % do alcance = Previsto do canal ÷ meta do canal, largura limitada a 100%. Meta vem do plano Q3 do time — cor do % de alcance compara com 100% da meta (não com o ritmo do mês, já que o Previsto projeta o mês inteiro). "Outros" agrupa fontes do plano ainda sem rastreamento no Metabase (inclui TikTok Ads, por enquanto).</div>
     ${GERAL_CANAIS_GOALS.map(c => {
-      const real = realizadoByCanal[c]||0, meta = metas[c]||0;
-      const pct = meta>0 ? real/meta*100 : 0;
+      const prev = previstoByCanal[c]||0, meta = metas[c]||0;
+      const pct = meta>0 ? prev/meta*100 : 0;
       return `<div class="chbar-row">
         <div class="name">${c}</div>
         <div class="chbar-track"><div class="chbar-fill" style="width:${Math.min(100,pct)}%;background:${GERAL_CANAL_COLOR[c]}"></div></div>
@@ -245,7 +251,7 @@ function geralRenderPrevisao(data) {
       <tbody>
         ${GERAL_CANAIS_GOALS.map(c => {
           const real = realizadoByCanal[c]||0, prev = previstoByCanal[c]||0, meta = metas[c]||0;
-          const pct = meta>0 ? real/meta*100 : null;
+          const pct = meta>0 ? prev/meta*100 : null;
           return `<tr>
             <td class="name-cell"><span class="swatch" style="background:${GERAL_CANAL_COLOR[c]}"></span>${c}</td>
             <td class="r">${fN(real)}</td>
