@@ -153,18 +153,24 @@ function geralRender7Dias(data) {
   return `
   <div class="card" style="margin-bottom:16px">
     <div class="card-title">Últimos 7 Dias</div>
-    <div style="display:flex;gap:8px;align-items:flex-end;height:90px;margin-bottom:16px;padding:0 4px">
-      ${rows7d.map((r,i) => `
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
-          <div style="font-size:11px;font-weight:700;color:${i===0?'#02A378':'#212121BF'}">${fN(r.conversions)}</div>
-          <div style="width:100%;background:${i===0?'#02A378':'#E7E8EC'};border-radius:3px 3px 0 0;height:${Math.max(4,r.conversions/maxConv*54)}px"></div>
-        </div>`).join('')}
+    <div class="section-note">Cadastros, sessões e conversão dia a dia — proteção contra a janela de atribuição do GA4 (sessões de um dia podem seguir sendo revisadas por até ~14 dias). Do mais recente (${disp(rows7d[0].date)}) para o mais antigo (${disp(rows7d[rows7d.length-1].date)}).</div>
+    <div style="display:flex;gap:10px;align-items:flex-end;height:110px;margin-bottom:18px;padding:0 4px">
+      ${rows7d.map((r,i) => {
+        const isWeekend = geralWeekday(r.date)===0 || geralWeekday(r.date)===6;
+        const barColor = i===0 ? 'var(--jf-green)' : (isWeekend ? '#D7D8DC' : 'var(--jf-border-strong)');
+        return `
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:6px">
+          <div style="font-size:12px;font-weight:700;${i===0?'color:var(--jf-green)':''}">${fN(r.conversions)}</div>
+          <div style="width:100%;max-width:40px;background:${barColor};border-radius:4px 4px 0 0;height:${Math.max(4,r.conversions/maxConv*56)}px"></div>
+          <div style="font-size:11px;color:var(--jf-muted-dark);text-align:center;${i===0?'font-weight:700':''}">${GERAL_WD_LABELS[geralWeekday(r.date)]}<br>${r.date.slice(8,10)}/${r.date.slice(5,7)}</div>
+        </div>`;
+      }).join('')}
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>Dia</th><th class="r">Cadastros</th><th class="r">Sessões</th><th class="r">Conversão</th></tr></thead>
       <tbody>${rows7d.map(r => `
         <tr style="${r.isPeriodo?'font-weight:700':''}">
-          <td>${GERAL_WD_LABELS[geralWeekday(r.date)]} ${disp(r.date)}</td>
+          <td>${GERAL_WD_LABELS[geralWeekday(r.date)]} · ${disp(r.date)}</td>
           <td class="r">${fN(r.conversions)}</td>
           <td class="r">${fN(r.sessions)}</td>
           <td class="r">${r.sessions>0?fP(r.conversions/r.sessions*100):'—'}</td>
@@ -204,30 +210,34 @@ function geralRenderPrevisao(data) {
       ${kpiCard('Realizado (mês)', totRealizado, undefined, fN, 'c-blue')}
       ${kpiCard('Previsto (mês)', totPrevisto, undefined, fN, 'c-muted')}
       ${kpiCard('Meta do Mês', totMeta, undefined, fN, 'c-muted')}
-      <div class="card"><div class="kpi-label">% DO ALCANCE DA META</div>
+      <div class="card"><div class="kpi-label">% do Alcance da Meta</div>
         <div class="kpi-value ${pctCls(pctAlcance)}">${fP(pctAlcance)}</div>
-        <div style="font-size:11px;color:#212121BF">faltam ≈ ${fN(Math.max(0,totMeta-totRealizado))} · ${pctMesDecorrido.toFixed(0)}% do mês decorrido</div>
+        <div class="kpi-cmp">faltam ≈ ${fN(Math.max(0,totMeta-totRealizado))} · ${pctMesDecorrido.toFixed(0)}% do mês decorrido</div>
       </div>
     </div>
-    <div class="section-note" style="font-size:11px;color:#212121BF;margin-bottom:12px">Realizado e Previsto são cadastros reais (Metabase), projetados dia a dia por canal usando a média das últimas 4 ocorrências do mesmo dia da semana (pulando feriados). Meta vem do plano Q3 do time — cor do % de alcance compara com o quanto do mês já passou, não com 100% fixo. "Outros" agrupa fontes do plano ainda sem rastreamento no Metabase (inclui TikTok Ads, por enquanto).</div>
-    <div class="table-wrap"><table>
+    <div class="section-note">Realizado e Previsto são cadastros reais (Metabase), projetados dia a dia por canal usando a média das últimas 4 ocorrências do mesmo dia da semana (pulando feriados). Barra e % do alcance = Realizado do canal ÷ meta do canal, largura limitada a 100%. Meta vem do plano Q3 do time — cor do % de alcance compara com o quanto do mês já passou (${pctMesDecorrido.toFixed(1)}%), não com 100% fixo. "Outros" agrupa fontes do plano ainda sem rastreamento no Metabase (inclui TikTok Ads, por enquanto).</div>
+    ${GERAL_CANAIS_GOALS.map(c => {
+      const real = realizadoByCanal[c]||0, meta = metas[c]||0;
+      const pct = meta>0 ? real/meta*100 : 0;
+      return `<div class="chbar-row">
+        <div class="name">${c}</div>
+        <div class="chbar-track"><div class="chbar-fill" style="width:${Math.min(100,pct)}%;background:${GERAL_CANAL_COLOR[c]}"></div></div>
+        <div class="val">${fP(pct)}</div>
+      </div>`;
+    }).join('')}
+    <div class="table-wrap" style="margin-top:16px"><table>
       <thead><tr><th>Canal</th><th class="r">Realizado</th><th class="r">Previsto (mês)</th><th class="r">Meta do Mês</th><th class="r">% do Alcance</th></tr></thead>
       <tbody>
         ${GERAL_CANAIS_GOALS.map(c => {
           const real = realizadoByCanal[c]||0, prev = previstoByCanal[c]||0, meta = metas[c]||0;
           const pct = meta>0 ? real/meta*100 : null;
           return `<tr>
-            <td><span class="badge" style="background:${GERAL_CANAL_COLOR[c]}22;color:${GERAL_CANAL_COLOR[c]};border:1px solid ${GERAL_CANAL_COLOR[c]}44">${c}</span></td>
+            <td class="name-cell"><span class="swatch" style="background:${GERAL_CANAL_COLOR[c]}"></span>${c}</td>
             <td class="r">${fN(real)}</td>
             <td class="r c-muted">${fN(prev)}</td>
             <td class="r c-muted">${fN(meta)}</td>
             <td class="r ${pctCls(pct)}"><strong>${pct==null?'—':fP(pct)}</strong></td>
-          </tr>
-          <tr><td colspan="5" style="padding:0 0 10px">
-            <div style="height:6px;background:#FAFAFA;border-radius:3px;overflow:hidden">
-              <div style="height:100%;background:${GERAL_CANAL_COLOR[c]};width:${Math.min(100,pct||0)}%"></div>
-            </div>
-          </td></tr>`;
+          </tr>`;
         }).join('')}
         <tr style="border-top:2px solid #E7E8EC">
           <td><strong>Total</strong></td>
@@ -241,33 +251,33 @@ function geralRenderPrevisao(data) {
   </div>`;
 }
 
-// ── Seção 4: Cadastro por Canal (respeita o filtro do topo) ──
+// ── Seção 4: Cadastro por Canal (respeita o filtro do topo) — mesmo padrão visual (chbar-row +
+// swatch) do Relatório Diário de Aquisição: barra normalizada pelo MAIOR canal do grupo (não pelo
+// total), senão canais pequenos ficam com barra invisível ao lado de um canal dominante. ──
 function geralRenderCanal(data) {
   const { canalRows, hasCmp, cmpByCanal } = data;
   const total = canalRows.reduce((s,r)=>s+r.cadastros,0);
   const sorted = canalRows.slice().sort((a,b)=>b.cadastros-a.cadastros).filter(r=>r.cadastros>0 || r.spend>0);
+  const maxCadastros = Math.max(1, ...sorted.map(r=>r.cadastros));
   return `
   <div class="card" style="margin-bottom:16px">
     <div class="card-title">Cadastro por Canal</div>
+    <div class="section-note">Dados de ${disp(S.start)} → ${disp(S.end)}. Google aberto em Brand Search (marca) e Non-brand.</div>
     ${sorted.map(r => `
-      <div style="margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <span class="badge" style="background:${GERAL_CANAL_COLOR[r.canal]}22;color:${GERAL_CANAL_COLOR[r.canal]};border:1px solid ${GERAL_CANAL_COLOR[r.canal]}44">${r.canal}</span>
-          <strong>${fN(r.cadastros)} cadastros</strong>
-        </div>
-        <div style="height:8px;background:#FAFAFA;border-radius:4px;overflow:hidden">
-          <div style="height:100%;background:${GERAL_CANAL_COLOR[r.canal]};border-radius:4px;width:${total>0?(r.cadastros/total*100).toFixed(1):0}%"></div>
-        </div>
+      <div class="chbar-row">
+        <div class="name">${r.canal}</div>
+        <div class="chbar-track"><div class="chbar-fill" style="width:${(r.cadastros/maxCadastros*100).toFixed(1)}%;background:${GERAL_CANAL_COLOR[r.canal]}"></div></div>
+        <div class="val">${fN(r.cadastros)}</div>
       </div>`).join('')}
-    <div class="table-wrap" style="margin-top:8px"><table>
+    <div class="table-wrap" style="margin-top:16px"><table>
       <thead><tr><th>Canal</th><th class="r">Cadastros</th><th class="r">Gasto</th><th class="r">CAC</th><th class="r">% do Total</th>${hasCmp?'<th class="r">Δ Cadastros</th>':''}</tr></thead>
       <tbody>${sorted.map(r => {
         const cmp = cmpByCanal ? cmpByCanal[r.canal] : undefined;
         return `<tr>
-          <td><strong>${r.canal}</strong></td>
+          <td class="name-cell"><span class="swatch" style="background:${GERAL_CANAL_COLOR[r.canal]}"></span>${r.canal}</td>
           <td class="r">${fN(r.cadastros)}</td>
-          <td class="r c-brand">${r.spend>0?fR(r.spend):'—'}</td>
-          <td class="r">${r.cadastros>0&&r.spend>0?fR(r.spend/r.cadastros):'—'}</td>
+          <td class="r c-brand">${r.spend>0?fR(r.spend):'<span class="dim">—</span>'}</td>
+          <td class="r">${r.cadastros>0&&r.spend>0?fR(r.spend/r.cadastros):'<span class="dim">—</span>'}</td>
           <td class="r c-muted">${total>0?fP(r.cadastros/total*100):'—'}</td>
           ${hasCmp?`<td class="r">${cmp!=null?deltaHtml(r.cadastros,cmp):'<span class="d-neu">novo</span>'}</td>`:''}
         </tr>`;
@@ -294,6 +304,7 @@ function geralRenderCategoria(data) {
   return `
   <div class="card" style="margin-bottom:16px">
     <div class="card-title">Cadastro por Categoria</div>
+    <div class="section-note">Dados de ${disp(S.start)} → ${disp(S.end)}.</div>
     <div class="table-wrap"><table>
       <thead><tr><th>Categoria</th><th class="r">Cadastros</th><th class="r">% do Total</th>${hasCmp?'<th class="r">Δ Cadastros</th>':''}</tr></thead>
       <tbody>${sorted.length ? sorted.map(r => {

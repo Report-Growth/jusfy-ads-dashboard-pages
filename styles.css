@@ -132,6 +132,19 @@ tr:hover td{background:#FAFAFA}
 .bar-bg{width:56px;height:4px;background:var(--jf-bg);border-radius:2px;flex-shrink:0}
 .bar-fill{height:100%;border-radius:2px}
 
+/* ── Channel bar row — mesmo padrão visual do Relatório Diário de Aquisição (Slack):
+   label de largura fixa + trilho fino + valor alinhado à direita. Usado em Visão Geral. ── */
+.chbar-row{display:flex;align-items:center;gap:10px;margin-bottom:9px;font-size:13px}
+.chbar-row .name{width:130px;flex:none;color:var(--jf-muted-dark)}
+.chbar-track{flex:1;background:var(--jf-bg);border-radius:5px;height:16px;position:relative;overflow:hidden}
+.chbar-fill{height:100%;border-radius:5px;transition:width .3s}
+.chbar-row .val{width:60px;flex:none;text-align:right;font-weight:700}
+.swatch{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;flex-shrink:0}
+td.name-cell{display:flex;align-items:center;font-weight:600}
+.dim{color:var(--jf-muted-dark)}
+.section-note{font-size:12px;color:var(--jf-muted-dark);margin:-6px 0 14px}
+@media(max-width:640px){.chbar-row .name{width:96px;font-size:12px}}
+
 /* ── Grid 2 ── */
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
