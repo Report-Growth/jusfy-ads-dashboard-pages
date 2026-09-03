@@ -1,184 +1,428 @@
-async function tabGeral() {
-  loading();
-  const [campAgg, dailyByPlatform, ga4Channels, cmpCampAgg, cmpGA4Channels, realConvTotals, campsRaw, convDaily] = await Promise.all([
-    fetchCampAgg(S.start, S.end),
-    fetchCampDailyByPlatform(S.start, S.end),
-    fetchGA4ChannelsAgg(S.start, S.end),
-    S.compare && S.cmpStart ? fetchCampAgg(S.cmpStart, S.cmpEnd)        : [],
-    S.compare && S.cmpStart ? fetchGA4ChannelsAgg(S.cmpStart, S.cmpEnd) : [],
-    fetchJusfyConversionsTotals(S.start, S.end),
-    fetchCamps(S.start, S.end),
-    fetchJusfyConversionsDailyAgg(S.start, S.end),
-  ]);
+// ── Visão Geral — retrabalhada em 03/09/2026 como resumo consolidado, usando a mesma
+// metodologia do Relatório Diário de Aquisição (Slack), sem a parte de "análise" (callouts,
+// texto interpretativo) nem "Melhores campanhas" nem os KPIs fixos do "dia" — isso já é coberto
+// pelo Diário. Seções: Números do Período (respeita o filtro do topo), Últimos 7 Dias (janela
+// fixa, sempre os 7 dias corridos mais recentes — proteção contra a janela de atribuição do
+// GA4, igual o relatório do Slack já faz), Previsão até o Fim do Mês (mês corrente fixo, com
+// metas do plano Q3), Cadastro por Canal e Cadastro por Categoria (ambos respeitam o filtro).
+//
+// Nomes prefixados com "geral"/"GERAL_" de propósito — diario.js já declara `weekdayOf` e
+// `WEEKDAY_LABELS` no mesmo escopo global (scripts soltos, sem module system), então evitamos
+// colidir declarando os nossos próprios equivalentes aqui.
 
-  // Lookup por nome/campaign_id, pra reclassificar conversões cujo referral no Metabase veio errado
-  // (Affiliate/Others) mas o utm_campaign é claramente de uma campanha paga real.
-  const campaignLookup = buildCampaignLookup(campsRaw);
-  const realByChannel = aggregateRealConversionsByChannel(realConvTotals, campaignLookup);
-  const realTotal = Object.values(realByChannel).reduce((s,v)=>s+v.clientes_unicos, 0);
-  const channelOrder = ['Google Ads','Meta Ads','Bing Ads','Orgânico','Social','Comunidade','CRM','ChatGPT','Outros'];
+// ── Metas de cadastros por canal, plano Q3 2026 do usuário (não vem do Metabase — valor fixo
+// por mês). Usada só na seção "Previsão até o Fim do Mês". Atualizar aqui quando o usuário
+// compartilhar metas de meses novos (mesma tabela usada no Relatório Diário de Aquisição).
+const GERAL_METAS_MES = {
+  '2026-07': { 'Google Non-brand':4644, 'Google Brand':1632, 'Meta':365, 'Bing':325, 'Afiliados':64,  'Orgânico':2863, 'Outros':107  },
+  '2026-08': { 'Google Non-brand':2955, 'Google Brand':1732, 'Meta':749, 'Bing':369, 'Afiliados':396, 'Orgânico':2848, 'Outros':951  },
+  '2026-09': { 'Google Non-brand':2535, 'Google Brand':1773, 'Meta':776, 'Bing':374, 'Afiliados':540, 'Orgânico':3050, 'Outros':1026 },
+};
 
-  const addMetrics = rows => rows.map(r => ({...r,
-    ctr: r.impressions>0 ? r.clicks/r.impressions*100 : 0,
-    cpa: r.conversions>0 ? r.spend/r.conversions : null
-  }));
+// ── Feriados nacionais + SP (mesma lista do Relatório Diário de Aquisição) — usados só pra
+// projeção de dias restantes do mês (tratados como "dia não-útil", baseline = média de
+// sábados+domingos em vez da média do mesmo dia da semana). Atualizar todo início de ano.
+const GERAL_FERIADOS = new Set([
+  '2025-01-01','2025-01-25','2025-03-03','2025-03-04','2025-04-18','2025-04-21','2025-05-01','2025-06-19','2025-07-09','2025-09-07','2025-10-12','2025-11-02','2025-11-15','2025-11-20','2025-12-25',
+  '2026-01-01','2026-01-25','2026-02-16','2026-02-17','2026-04-03','2026-04-21','2026-05-01','2026-06-04','2026-07-09','2026-09-07','2026-10-12','2026-11-02','2026-11-15','2026-11-20','2026-12-25',
+]);
 
-  const agg       = addMetrics(campAgg);
-  const cmpAgg    = cmpCampAgg.length ? addMetrics(cmpCampAgg) : [];
-  const ga4Agg    = ga4Channels;
-  const cmpGA4Agg = cmpGA4Channels.length ? cmpGA4Channels : [];
+const GERAL_WD_LABELS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const geralWeekday = dateStr => new Date(dateStr+'T12:00:00').getDay();
+const geralDiaNaoUtil = dateStr => { const wd = geralWeekday(dateStr); return wd===0 || wd===6 || GERAL_FERIADOS.has(dateStr); };
 
-  const gAgg  = agg.filter(r=>r.platform==='google_ads');
-  const mAgg  = agg.filter(r=>r.platform==='meta');
-  const biAgg = agg.filter(r=>r.platform==='bing_ads');
-  const cgAgg = cmpAgg.filter(r=>r.platform==='google_ads');
-  const cmAgg = cmpAgg.filter(r=>r.platform==='meta');
-  const cbiAgg = cmpAgg.filter(r=>r.platform==='bing_ads');
+// ── Cores por canal (reaproveita as cores de marca já usadas no resto do dashboard) ──
+const GERAL_CANAL_COLOR = {
+  'Google Non-brand':'#0182ab', 'Google Brand':'#045c74', 'Meta':'#ed723e', 'Bing':'#9551FB',
+  'TikTok':'#EE1D52', 'Orgânico':'#02A378', 'Afiliados':'#41C78F', 'Outros':'#CECED2',
+};
+const GERAL_CANAIS_GOALS = ['Google Non-brand','Google Brand','Meta','Bing','Afiliados','Orgânico','Outros']; // ordem da tabela de metas
 
-  const totalSpend  = sum(agg,'spend');
-  const gSpend      = sum(gAgg,'spend');
-  const mSpend      = sum(mAgg,'spend');
-  const biSpend     = sum(biAgg,'spend');
-  const totalSess   = sum(ga4Agg,'sessions');
-  const totalClicks = sum(agg,'clicks');
-  const totalImpr   = sum(agg,'impressions');
-  const ctr         = totalImpr>0 ? totalClicks/totalImpr*100 : 0;
+// Classifica uma linha de cadastro real (jusfy_conversions_daily) num dos 8 "canais" desta aba —
+// reaproveita classifyRealConversionChannel (mesma função usada no Diário/Google/Meta/Bing, já
+// trata referral errado via utm_campaign+campaignLookup) e só adiciona a quebra Brand/Non-brand
+// do Google (mesma regra do Relatório Diário: marketing_category='Brand Search') e o bucket
+// "Afiliados" (que a função de canal já joga em "Outros" por não ter padrão de referral próprio).
+function geralCanalBucket(row, campaignLookup) {
+  if ((row.marketing_category||'').trim().toLowerCase() === 'afiliados') return 'Afiliados';
+  const ch = classifyRealConversionChannel(row, campaignLookup);
+  if (ch === 'Google Ads') return row.marketing_category === 'Brand Search' ? 'Google Brand' : 'Google Non-brand';
+  if (ch === 'Meta Ads') return 'Meta';
+  if (ch === 'Bing Ads') return 'Bing';
+  if (ch === 'TikTok Ads') return 'TikTok';
+  if (ch === 'Orgânico' || ['Social','Comunidade','CRM','ChatGPT'].includes(ch)) return 'Orgânico';
+  return 'Outros';
+}
 
-  const cSpend  = cmpAgg.length    ? sum(cmpAgg,'spend')          : undefined;
-  const cgSpend = cgAgg.length     ? sum(cgAgg,'spend')           : undefined;
-  const cmSpend = cmAgg.length     ? sum(cmAgg,'spend')           : undefined;
-  const cbiSpend = cbiAgg.length   ? sum(cbiAgg,'spend')          : undefined;
-  const cSess   = cmpGA4Agg.length ? sum(cmpGA4Agg,'sessions')    : undefined;
+// Pra bater com a tabela de metas do plano Q3 (que não tem linha própria de TikTok — é uma fonte
+// nova ainda dentro do "Outros" do plano), dobra TikTok dentro de Outros só nesta seção.
+function geralGoalsBucket(canalBucket) {
+  return canalBucket === 'TikTok' ? 'Outros' : canalBucket;
+}
 
-  // Daily spend chart — by platform + linha de cadastros reais (Chart.js)
-  const dailyMap = {};
-  for (const r of dailyByPlatform) {
-    if (!dailyMap[r.date]) dailyMap[r.date]={g:0,m:0,bi:0};
-    if (r.platform==='google_ads') dailyMap[r.date].g  += +r.spend||0;
-    if (r.platform==='meta')       dailyMap[r.date].m  += +r.spend||0;
-    if (r.platform==='bing_ads')   dailyMap[r.date].bi += +r.spend||0;
+// Classifica pela categoria de marketing crua (Non brand / Brand Search / Orgânico / Afiliados-
+// Social) — dimensão diferente do canal: aqui não importa a plataforma, só o tipo de tráfego.
+function geralCategoriaBucket(row) {
+  const mc = (row.marketing_category||'').trim().toLowerCase();
+  if (mc === 'non brand') return 'Non brand';
+  if (mc === 'brand search') return 'Brand Search';
+  if (mc === 'orgânico' || mc === 'organico' || mc === 'chatgpt') return 'Orgânico';
+  if (mc === 'afiliados' || mc === 'social' || mc === 'comunidade' || mc === 'crm') return 'Afiliados/Social';
+  return 'Outros';
+}
+
+// Gasto de campaign_daily agrupado pelos mesmos buckets de canal (só as 4 plataformas pagas têm
+// gasto rastreável — Orgânico/Afiliados/Outros ficam sem gasto, "—" na tabela).
+function geralSpendByCanal(campsRaw, start, end) {
+  const m = {};
+  for (const r of campsRaw) {
+    if (r.date < start || r.date > end) continue;
+    let canal = null;
+    if (r.platform === 'google_ads') canal = campaignCategory(r.campaign_name) === 'Brand Search' ? 'Google Brand' : 'Google Non-brand';
+    else if (r.platform === 'meta')       canal = 'Meta';
+    else if (r.platform === 'bing_ads')   canal = 'Bing';
+    else if (r.platform === 'tiktok_ads') canal = 'TikTok';
+    if (!canal) continue;
+    m[canal] = (m[canal]||0) + (+r.spend||0);
   }
-  const convByDate = {};
-  for (const r of convDaily) convByDate[r.date] = (convByDate[r.date]||0) + (+r.clientes_unicos||0);
+  return m;
+}
 
-  const days = Object.keys(dailyMap).sort();
-  const diffDays = (new Date(S.end)-new Date(S.start))/864e5;
-
-  let chartLabels, chartG, chartM, chartBi, chartConv, chartTotalSpend;
-  if (diffDays <= 45) {
-    chartLabels = days.map(d => d.slice(5).split('-').reverse().join('/'));
-    chartG    = days.map(d => dailyMap[d].g);
-    chartM    = days.map(d => dailyMap[d].m);
-    chartBi   = days.map(d => dailyMap[d].bi);
-    chartConv = days.map(d => convByDate[d] || 0);
-  } else {
-    const mMap = {};
-    for (const d of days) {
-      const mon = d.slice(0,7);
-      if (!mMap[mon]) mMap[mon] = {g:0,m:0,bi:0,conv:0};
-      mMap[mon].g    += dailyMap[d].g;
-      mMap[mon].m    += dailyMap[d].m;
-      mMap[mon].bi   += dailyMap[d].bi;
-      mMap[mon].conv += (convByDate[d] || 0);
+// Datas-base usadas pra projetar `dateStr`: se é dia não-útil (fim de semana ou feriado), usa os
+// últimos 4 sábados + últimos 4 domingos (8 valores); senão, as últimas 4 ocorrências do mesmo
+// dia da semana, pulando datas que caiam em feriado (mesma regra do Relatório Diário).
+function geralBaselineDates(dateStr) {
+  if (geralDiaNaoUtil(dateStr)) {
+    const sats = [], suns = [];
+    let cursor = addDays(new Date(dateStr+'T12:00:00'), -1), guard = 0;
+    while ((sats.length < 4 || suns.length < 4) && guard < 60) {
+      const wd = cursor.getDay(), ds = fmt(cursor);
+      if (wd === 6 && sats.length < 4) sats.push(ds);
+      if (wd === 0 && suns.length < 4) suns.push(ds);
+      cursor = addDays(cursor, -1);
+      guard++;
     }
-    const months = Object.keys(mMap).sort();
-    chartLabels = months.map(mon => new Date(mon+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}));
-    chartG    = months.map(mon => mMap[mon].g);
-    chartM    = months.map(mon => mMap[mon].m);
-    chartBi   = months.map(mon => mMap[mon].bi);
-    chartConv = months.map(mon => mMap[mon].conv);
+    return [...sats, ...suns];
   }
-  chartTotalSpend = chartG.map((g,i) => g + chartM[i] + chartBi[i]);
-  const chartCac = chartTotalSpend.map((s,i) => chartConv[i] > 0 ? s / chartConv[i] : null);
-
-  function renderGeralChart() {
-    renderComboChart('geralChart', chartLabels, [
-      { label:'Google Ads', data:chartG,  backgroundColor:'#01563F' },
-      { label:'Meta Ads',   data:chartM,  backgroundColor:'#02A378' },
-      { label:'Bing Ads',   data:chartBi, backgroundColor:'#41C78F' },
-    ], [
-      { label:'Cadastros Reais', data:chartConv, borderColor:'#212121', yAxisID:'y1' },
-      { label:'CAC', data:chartCac, borderColor:'#e05a69', yAxisID:'y', borderDash:[5,3] },
-    ]);
+  const wd = geralWeekday(dateStr);
+  const dates = [];
+  let cursor = addDays(new Date(dateStr+'T12:00:00'), -7), guard = 0;
+  while (dates.length < 4 && guard < 20) {
+    const ds = fmt(cursor);
+    if (cursor.getDay() === wd && !GERAL_FERIADOS.has(ds)) dates.push(ds);
+    cursor = addDays(cursor, -7);
+    guard++;
   }
+  return dates;
+}
 
-  // Sessões por origem (UTM source)
-  const srcMap = {};
-  for (const r of ga4Agg) {
-    if (!srcMap[r.source]) srcMap[r.source]=0;
-    srcMap[r.source] += r.sessions;
-  }
-  const sources = Object.entries(srcMap).sort(([,a],[,b])=>b-a);
+// ── Seção 1: Números do Período (respeita o filtro do topo, mesma métrica/estilo do Diário) ──
+function geralRenderPeriodo(data) {
+  const { campsRaw, ga4, convDaily, cmpCampsRaw, cmpGA4, cmpConvDaily, hasCmp } = data;
+  const totSpend = sum(campsRaw, 'spend');
+  const totSess  = sum(ga4, 'sessions');
+  const totConv  = sum(convDaily, 'clientes_unicos');
+  const totCAC   = totConv > 0 ? totSpend / totConv : null;
+  const totTX    = totSess > 0 ? totConv / totSess * 100 : 0;
 
-  document.getElementById('content').innerHTML = `
-  <div class="kpi-grid cols-4" style="margin-bottom:20px">
-    ${kpiCard('Investimento Total', totalSpend,  cSpend,  fR, 'c-brand')}
-    ${kpiCard('Google Ads',         gSpend,      cgSpend, fR, 'c-blue')}
-    ${kpiCard('Meta Ads',           mSpend,      cmSpend, fR, 'c-yellow')}
-    ${kpiCard('Bing Ads',           biSpend,     cbiSpend, fR, 'c-green')}
-  </div>
-  <div class="kpi-grid cols-4" style="margin-bottom:20px">
-    ${kpiCard('Sessões (GA4)',    totalSess, cSess, fN, 'c-green')}
-    ${kpiCard('CTR Médio',        ctr,      undefined,  fP, 'c-muted')}
-    ${kpiCard('Campanhas Ativas', new Set(agg.map(r=>r.campaign_name)).size, undefined, fN, 'c-muted')}
-    ${kpiCard('Conversões Totais (Metabase)', realTotal, undefined, fN, 'c-blue')}
-  </div>
+  const cTotSpend = hasCmp ? sum(cmpCampsRaw, 'spend') : undefined;
+  const cTotSess  = hasCmp ? sum(cmpGA4, 'sessions')   : undefined;
+  const cTotConv  = hasCmp ? sum(cmpConvDaily, 'clientes_unicos') : undefined;
+  const cTotCAC   = (hasCmp && cTotConv > 0) ? cTotSpend / cTotConv : undefined;
 
+  return `
   <div class="card" style="margin-bottom:16px">
-    <div class="card-title">Conversões Reais por Canal (Metabase)</div>
+    <div class="card-title">Números do Período — ${disp(S.start)} → ${disp(S.end)}</div>
+    <div class="kpi-grid cols-5">
+      ${kpiCard('Investimento', totSpend, cTotSpend, fR, 'c-brand')}
+      ${kpiCard('Cadastros Reais', totConv, cTotConv, fN, 'c-blue')}
+      ${kpiCard('CAC Real', totCAC, cTotCAC, fR, 'c-brand', true)}
+      ${kpiCard('Sessões (GA4)', totSess, cTotSess, fN, 'c-green')}
+      ${kpiCard('Taxa de Conversão', totTX, undefined, fP, 'c-muted')}
+    </div>
+  </div>`;
+}
+
+// ── Seção 2: Últimos 7 Dias — janela fixa (7 dias corridos terminando ontem), independente do
+// filtro do topo. Mostra sessões junto com cadastros de propósito: sessões de um dia podem
+// continuar sendo revisadas por até ~14 dias pela sincronização do GA4 (ver bug documentado no
+// sync-ga4), então acompanhar a tendência recente ajuda a pegar isso cedo.
+function geralRender7Dias(data) {
+  const { rows7d } = data;
+  const maxConv = Math.max(1, ...rows7d.map(r => r.conversions));
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">Últimos 7 Dias</div>
+    <div style="display:flex;gap:8px;align-items:flex-end;height:90px;margin-bottom:16px;padding:0 4px">
+      ${rows7d.map((r,i) => `
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div style="font-size:11px;font-weight:700;color:${i===0?'#02A378':'#212121BF'}">${fN(r.conversions)}</div>
+          <div style="width:100%;background:${i===0?'#02A378':'#E7E8EC'};border-radius:3px 3px 0 0;height:${Math.max(4,r.conversions/maxConv*54)}px"></div>
+        </div>`).join('')}
+    </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Canal</th><th class="r">Clientes Únicos</th><th class="r">% do Total</th></tr></thead>
+      <thead><tr><th>Dia</th><th class="r">Cadastros</th><th class="r">Sessões</th><th class="r">Conversão</th></tr></thead>
+      <tbody>${rows7d.map(r => `
+        <tr style="${r.isPeriodo?'font-weight:700':''}">
+          <td>${GERAL_WD_LABELS[geralWeekday(r.date)]} ${disp(r.date)}</td>
+          <td class="r">${fN(r.conversions)}</td>
+          <td class="r">${fN(r.sessions)}</td>
+          <td class="r">${r.sessions>0?fP(r.conversions/r.sessions*100):'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+  </div>`;
+}
+
+// ── Seção 3: Previsão até o Fim do Mês — mês corrente fixo (não usa o filtro do topo), com
+// metas do plano Q3 por canal. Realizado = cadastros reais desde dia 1 do mês até ontem;
+// Previsto = Realizado + projeção dos dias restantes (baseline por dia da semana, ver
+// geralBaselineDates); % de alcance = Realizado ÷ Meta do mês.
+function geralRenderPrevisao(data) {
+  const { monthKey, monthLabel, realizadoByCanal, previstoByCanal, diasRestantes, pctMesDecorrido } = data;
+  const metas = GERAL_METAS_MES[monthKey];
+
+  const totRealizado = GERAL_CANAIS_GOALS.reduce((s,c)=>s+(realizadoByCanal[c]||0),0);
+  const totPrevisto   = GERAL_CANAIS_GOALS.reduce((s,c)=>s+(previstoByCanal[c]||0),0);
+  const totMeta        = metas ? GERAL_CANAIS_GOALS.reduce((s,c)=>s+(metas[c]||0),0) : null;
+  const pctAlcance      = totMeta ? totRealizado/totMeta*100 : null;
+
+  if (!metas) {
+    return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Previsão até o Fim do Mês — ${monthLabel}</div>
+      <div class="c-muted" style="padding:16px;font-size:13px">Meta de cadastros de ${monthLabel} ainda não cadastrada no dashboard (plano Q3 só cobre jul-set/2026). Realizado até ontem: <strong>${fN(totRealizado)}</strong> cadastros reais.</div>
+    </div>`;
+  }
+
+  const pctCls = v => v==null ? '' : (v >= pctMesDecorrido ? 'c-green' : 'c-red');
+
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">Previsão até o Fim do Mês — ${monthLabel}</div>
+    <div class="kpi-grid cols-4" style="margin-bottom:20px">
+      ${kpiCard('Realizado (mês)', totRealizado, undefined, fN, 'c-blue')}
+      ${kpiCard('Previsto (mês)', totPrevisto, undefined, fN, 'c-muted')}
+      ${kpiCard('Meta do Mês', totMeta, undefined, fN, 'c-muted')}
+      <div class="card"><div class="kpi-label">% DO ALCANCE DA META</div>
+        <div class="kpi-value ${pctCls(pctAlcance)}">${fP(pctAlcance)}</div>
+        <div style="font-size:11px;color:#212121BF">faltam ≈ ${fN(Math.max(0,totMeta-totRealizado))} · ${pctMesDecorrido.toFixed(0)}% do mês decorrido</div>
+      </div>
+    </div>
+    <div class="section-note" style="font-size:11px;color:#212121BF;margin-bottom:12px">Realizado e Previsto são cadastros reais (Metabase), projetados dia a dia por canal usando a média das últimas 4 ocorrências do mesmo dia da semana (pulando feriados). Meta vem do plano Q3 do time — cor do % de alcance compara com o quanto do mês já passou, não com 100% fixo. "Outros" agrupa fontes do plano ainda sem rastreamento no Metabase (inclui TikTok Ads, por enquanto).</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Canal</th><th class="r">Realizado</th><th class="r">Previsto (mês)</th><th class="r">Meta do Mês</th><th class="r">% do Alcance</th></tr></thead>
       <tbody>
-        ${channelOrder.map(ch => {
-          const v = realByChannel[ch] || { clientes_unicos: 0 };
-          const pct = realTotal>0 ? v.clientes_unicos/realTotal*100 : 0;
+        ${GERAL_CANAIS_GOALS.map(c => {
+          const real = realizadoByCanal[c]||0, prev = previstoByCanal[c]||0, meta = metas[c]||0;
+          const pct = meta>0 ? real/meta*100 : null;
           return `<tr>
-            <td><strong>${ch}</strong></td>
-            <td class="r c-blue">${fN(v.clientes_unicos)}</td>
-            <td class="r c-muted">${fP(pct)}</td>
-          </tr>`;
+            <td><span class="badge" style="background:${GERAL_CANAL_COLOR[c]}22;color:${GERAL_CANAL_COLOR[c]};border:1px solid ${GERAL_CANAL_COLOR[c]}44">${c}</span></td>
+            <td class="r">${fN(real)}</td>
+            <td class="r c-muted">${fN(prev)}</td>
+            <td class="r c-muted">${fN(meta)}</td>
+            <td class="r ${pctCls(pct)}"><strong>${pct==null?'—':fP(pct)}</strong></td>
+          </tr>
+          <tr><td colspan="5" style="padding:0 0 10px">
+            <div style="height:6px;background:#FAFAFA;border-radius:3px;overflow:hidden">
+              <div style="height:100%;background:${GERAL_CANAL_COLOR[c]};width:${Math.min(100,pct||0)}%"></div>
+            </div>
+          </td></tr>`;
         }).join('')}
-        <tr style="border-top:1px solid #E7E8EC">
+        <tr style="border-top:2px solid #E7E8EC">
           <td><strong>Total</strong></td>
-          <td class="r c-blue"><strong>${fN(realTotal)}</strong></td>
-          <td class="r c-muted">100%</td>
+          <td class="r"><strong>${fN(totRealizado)}</strong></td>
+          <td class="r"><strong>${fN(totPrevisto)}</strong></td>
+          <td class="r"><strong>${fN(totMeta)}</strong></td>
+          <td class="r ${pctCls(pctAlcance)}"><strong>${fP(pctAlcance)}</strong></td>
         </tr>
       </tbody>
     </table></div>
-  </div>
+  </div>`;
+}
 
+// ── Seção 4: Cadastro por Canal (respeita o filtro do topo) ──
+function geralRenderCanal(data) {
+  const { canalRows, hasCmp, cmpByCanal } = data;
+  const total = canalRows.reduce((s,r)=>s+r.cadastros,0);
+  const sorted = canalRows.slice().sort((a,b)=>b.cadastros-a.cadastros).filter(r=>r.cadastros>0 || r.spend>0);
+  return `
   <div class="card" style="margin-bottom:16px">
-    <div class="card-title">Investimento Diário por Plataforma × Cadastros Reais</div>
-    <div style="height:320px;position:relative">
-      ${days.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="geralChart"></canvas>'}
-    </div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px">
-      <div class="card-title">Distribuição por Plataforma</div>
-      ${[
-        {label:'Google Ads', val:gSpend,  pct:totalSpend>0?gSpend/totalSpend:0,  bg:'#01563F'},
-        {label:'Meta Ads',   val:mSpend,  pct:totalSpend>0?mSpend/totalSpend:0,  bg:'#02A378'},
-        {label:'Bing Ads',   val:biSpend, pct:totalSpend>0?biSpend/totalSpend:0, bg:'#41C78F'},
-      ].map(x=>`
-        <div style="margin-bottom:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span class="badge" style="background:${x.bg}22;color:${x.bg};border:1px solid ${x.bg}44">${x.label}</span>
-            <strong style="color:#212121">${fR(x.val)}</strong>
-          </div>
-          <div style="height:8px;background:#FAFAFA;border-radius:4px;overflow:hidden;margin-bottom:3px">
-            <div style="height:100%;background:${x.bg};border-radius:4px;width:${(x.pct*100).toFixed(1)}%;transition:width .4s"></div>
-          </div>
-          <div style="font-size:11px;color:#212121BF;text-align:right">${(x.pct*100).toFixed(1)}% do total</div>
-        </div>`).join('')}
-      <div style="border-top:1px solid #E7E8EC;padding-top:12px;display:flex;flex-direction:column;gap:6px">
-        <div style="display:flex;justify-content:space-between;font-size:13px">
-          <span class="c-muted">Total de dias</span><strong>${days.length}</strong>
+    <div class="card-title">Cadastro por Canal</div>
+    ${sorted.map(r => `
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span class="badge" style="background:${GERAL_CANAL_COLOR[r.canal]}22;color:${GERAL_CANAL_COLOR[r.canal]};border:1px solid ${GERAL_CANAL_COLOR[r.canal]}44">${r.canal}</span>
+          <strong>${fN(r.cadastros)} cadastros</strong>
         </div>
-      </div>
-  </div>
+        <div style="height:8px;background:#FAFAFA;border-radius:4px;overflow:hidden">
+          <div style="height:100%;background:${GERAL_CANAL_COLOR[r.canal]};border-radius:4px;width:${total>0?(r.cadastros/total*100).toFixed(1):0}%"></div>
+        </div>
+      </div>`).join('')}
+    <div class="table-wrap" style="margin-top:8px"><table>
+      <thead><tr><th>Canal</th><th class="r">Cadastros</th><th class="r">Gasto</th><th class="r">CAC</th><th class="r">% do Total</th>${hasCmp?'<th class="r">Δ Cadastros</th>':''}</tr></thead>
+      <tbody>${sorted.map(r => {
+        const cmp = cmpByCanal ? cmpByCanal[r.canal] : undefined;
+        return `<tr>
+          <td><strong>${r.canal}</strong></td>
+          <td class="r">${fN(r.cadastros)}</td>
+          <td class="r c-brand">${r.spend>0?fR(r.spend):'—'}</td>
+          <td class="r">${r.cadastros>0&&r.spend>0?fR(r.spend/r.cadastros):'—'}</td>
+          <td class="r c-muted">${total>0?fP(r.cadastros/total*100):'—'}</td>
+          ${hasCmp?`<td class="r">${cmp!=null?deltaHtml(r.cadastros,cmp):'<span class="d-neu">novo</span>'}</td>`:''}
+        </tr>`;
+      }).join('')}
+      <tr style="border-top:2px solid #E7E8EC">
+        <td><strong>Total</strong></td>
+        <td class="r"><strong>${fN(total)}</strong></td>
+        <td class="r c-brand"><strong>${fR(sorted.reduce((s,r)=>s+r.spend,0))}</strong></td>
+        <td class="r"></td>
+        <td class="r"><strong>100%</strong></td>
+        ${hasCmp?'<td></td>':''}
+      </tr>
+      </tbody>
+    </table></div>
+  </div>`;
+}
 
-  `;
+// ── Seção 5: Cadastro por Categoria (respeita o filtro do topo) ──
+function geralRenderCategoria(data) {
+  const { categoriaRows, hasCmp, cmpByCategoria } = data;
+  const total = categoriaRows.reduce((s,r)=>s+r.cadastros,0);
+  const order = ['Non brand','Brand Search','Orgânico','Afiliados/Social','Outros'];
+  const sorted = order.map(c => categoriaRows.find(r=>r.categoria===c) || {categoria:c, cadastros:0}).filter(r=>r.cadastros>0);
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">Cadastro por Categoria</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Categoria</th><th class="r">Cadastros</th><th class="r">% do Total</th>${hasCmp?'<th class="r">Δ Cadastros</th>':''}</tr></thead>
+      <tbody>${sorted.length ? sorted.map(r => {
+        const cmp = cmpByCategoria ? cmpByCategoria[r.categoria] : undefined;
+        return `<tr>
+          <td><strong>${r.categoria}</strong></td>
+          <td class="r">${fN(r.cadastros)}</td>
+          <td class="r c-muted">${total>0?fP(r.cadastros/total*100):'—'}</td>
+          ${hasCmp?`<td class="r">${cmp!=null?deltaHtml(r.cadastros,cmp):'<span class="d-neu">novo</span>'}</td>`:''}
+        </tr>`;
+      }).join('') : emptyRow(hasCmp?4:3)}
+      <tr style="border-top:2px solid #E7E8EC">
+        <td><strong>Total</strong></td>
+        <td class="r"><strong>${fN(total)}</strong></td>
+        <td class="r"><strong>100%</strong></td>
+        ${hasCmp?'<td></td>':''}
+      </tr>
+      </tbody>
+    </table></div>
+  </div>`;
+}
 
-  renderGeralChart();
+async function tabGeral() {
+  loading();
+
+  const todayD    = today();
+  const yestD     = yesterday();
+  const monthStart = fmt(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const monthEnd    = fmt(new Date(new Date().getFullYear(), new Date().getMonth()+1, 0));
+  const monthKey    = todayD.slice(0,7);
+  const monthLabel  = new Date(monthStart+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  const last7Start  = fmt(addDays(new Date(yestD+'T12:00:00'), -6));
+
+  // Janela de histórico pra baseline de projeção: até 9 semanas antes do início do mês corrente,
+  // garante 4 ocorrências de qualquer dia da semana mesmo pulando feriados.
+  const baselineStart = fmt(addDays(new Date(monthStart+'T12:00:00'), -63));
+  const wideStart = baselineStart < last7Start ? baselineStart : last7Start; // cobre as 3 janelas (período filtrado tratado à parte)
+
+  const [
+    campsRaw, ga4, convDaily,                              // período filtrado (S.start..S.end)
+    cmpCampsRaw, cmpGA4, cmpConvDaily,                      // comparação do período filtrado
+    ga47d, conv7d,                                          // últimos 7 dias (janela fixa)
+    convWide, campsWide,                                    // janela ampla p/ baseline de projeção
+  ] = await Promise.all([
+    fetchCamps(S.start, S.end),
+    fetchGA4DailyAgg(S.start, S.end),
+    fetchJusfyConversionsDailyAgg(S.start, S.end),
+    S.compare && S.cmpStart ? fetchCamps(S.cmpStart, S.cmpEnd) : [],
+    S.compare && S.cmpStart ? fetchGA4DailyAgg(S.cmpStart, S.cmpEnd) : [],
+    S.compare && S.cmpStart ? fetchJusfyConversionsDailyAgg(S.cmpStart, S.cmpEnd) : [],
+    fetchGA4DailyAgg(last7Start, yestD),
+    fetchJusfyConversionsDailyAgg(last7Start, yestD),
+    fetchJusfyConversionsDailyAgg(wideStart, todayD),
+    fetchCamps(wideStart, todayD),
+  ]);
+
+  const hasCmp = S.compare && !!S.cmpStart && cmpCampsRaw.length + cmpConvDaily.length > 0;
+
+  // ── Seção 1 ──
+  const periodoHtml = geralRenderPeriodo({ campsRaw, ga4, convDaily, cmpCampsRaw, cmpGA4, cmpConvDaily, hasCmp });
+
+  // ── Seção 2: Últimos 7 dias (mais recente primeiro) ──
+  const sess7Map = Object.fromEntries(ga47d.map(r => [r.date, +r.sessions||0]));
+  const conv7Map = {};
+  for (const r of conv7d) conv7Map[r.date] = (conv7Map[r.date]||0) + (+r.clientes_unicos||0);
+  const dates7 = [];
+  for (let i=0;i<7;i++) dates7.push(fmt(addDays(new Date(yestD+'T12:00:00'), -i)));
+  const rows7d = dates7.map((d,i) => ({ date:d, sessions: sess7Map[d]||0, conversions: conv7Map[d]||0, isPeriodo: i===0 }));
+  const dias7Html = geralRender7Dias({ rows7d });
+
+  // ── Seção 3: Previsão até o fim do mês (canal via campaignLookup construído na janela ampla) ──
+  const campaignLookupWide = buildCampaignLookup(campsWide);
+  const byDateCanal = {}; // {date: {canal: cadastros}}
+  for (const r of convWide) {
+    const canal = geralGoalsBucket(geralCanalBucket(r, campaignLookupWide));
+    if (!byDateCanal[r.date]) byDateCanal[r.date] = {};
+    byDateCanal[r.date][canal] = (byDateCanal[r.date][canal]||0) + (+r.clientes_unicos||0);
+  }
+  const realizadoByCanal = {};
+  for (const c of GERAL_CANAIS_GOALS) realizadoByCanal[c] = 0;
+  for (let d = monthStart; d <= yestD; d = fmt(addDays(new Date(d+'T12:00:00'), 1))) {
+    const dayData = byDateCanal[d] || {};
+    for (const c of GERAL_CANAIS_GOALS) realizadoByCanal[c] += dayData[c] || 0;
+  }
+  const previstoByCanal = { ...realizadoByCanal };
+  for (let d = todayD; d <= monthEnd; d = fmt(addDays(new Date(d+'T12:00:00'), 1))) {
+    const baseDates = geralBaselineDates(d);
+    for (const c of GERAL_CANAIS_GOALS) {
+      const vals = baseDates.map(bd => (byDateCanal[bd] && byDateCanal[bd][c]) || 0);
+      const avg = vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
+      previstoByCanal[c] += avg;
+    }
+  }
+  for (const c of GERAL_CANAIS_GOALS) previstoByCanal[c] = Math.round(previstoByCanal[c]);
+  const diasNoMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
+  const diasDecorridos = Math.min(diasNoMes, new Date(yestD+'T12:00:00').getDate());
+  const pctMesDecorrido = diasDecorridos / diasNoMes * 100;
+  const previsaoHtml = geralRenderPrevisao({ monthKey, monthLabel, realizadoByCanal, previstoByCanal, pctMesDecorrido });
+
+  // ── Seções 4 e 5: canal/categoria do período filtrado. Usa sempre campaignLookupWide (janela
+  // ampla, já buscada pra Seção 3) em vez de montar um lookup só com as campanhas do período
+  // filtrado — um lookup mais estreito muda a classificação de linhas ambíguas (utm_campaign que
+  // bate com mais de uma campanha candidata) e fazia "Realizado" da Previsão divergir do total de
+  // "Cadastro por Canal" pros mesmos dias. O lookup amplo é sempre um superconjunto, nunca perde
+  // campanha nenhuma do período filtrado — só evita ficar mais pobre de contexto que o necessário.
+  const spendByCanal = geralSpendByCanal(campsRaw, S.start, S.end);
+  const canalMap = {}, categoriaMap = {};
+  for (const r of convDaily) {
+    const canal = geralCanalBucket(r, campaignLookupWide);
+    canalMap[canal] = (canalMap[canal]||0) + (+r.clientes_unicos||0);
+    const cat = geralCategoriaBucket(r);
+    categoriaMap[cat] = (categoriaMap[cat]||0) + (+r.clientes_unicos||0);
+  }
+  const canalRows = Object.keys(GERAL_CANAL_COLOR).map(c => ({ canal:c, cadastros: canalMap[c]||0, spend: spendByCanal[c]||0 }));
+  const categoriaRows = Object.entries(categoriaMap).map(([categoria,cadastros]) => ({categoria, cadastros}));
+
+  let cmpByCanal, cmpByCategoria;
+  if (hasCmp) {
+    cmpByCanal = {}; cmpByCategoria = {};
+    for (const r of cmpConvDaily) {
+      const canal = geralCanalBucket(r, campaignLookupWide);
+      cmpByCanal[canal] = (cmpByCanal[canal]||0) + (+r.clientes_unicos||0);
+      const cat = geralCategoriaBucket(r);
+      cmpByCategoria[cat] = (cmpByCategoria[cat]||0) + (+r.clientes_unicos||0);
+    }
+  }
+
+  const canalHtml = geralRenderCanal({ canalRows, hasCmp, cmpByCanal });
+  const categoriaHtml = geralRenderCategoria({ categoriaRows, hasCmp, cmpByCategoria });
+
+  document.getElementById('content').innerHTML = periodoHtml + dias7Html + previsaoHtml + canalHtml + categoriaHtml;
 }

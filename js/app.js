@@ -53,7 +53,7 @@ function applyFilter() {
 
 // ── Tabs ──
 const TABS = [
-  // {id:'geral',        label:'📊 Visão Geral'}, // oculta a pedido do usuário (17/07/2026) — dados migrando pro Diário
+  {id:'geral',        label:'📊 Visão Geral'}, // retrabalhada em 03/09/2026 — resumo consolidado, ver geral.js
   {id:'diario',       label:'📅 Diário'},
   // {id:'aniversario',  label:'🎂 Aniversário'}, // oculta a pedido do usuário (26/08/2026)
   {id:'google',       label:'🔵 Google Ads'},
