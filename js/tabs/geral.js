@@ -42,6 +42,21 @@ const GERAL_CANAL_COLOR = {
 };
 const GERAL_CANAIS_GOALS = ['Google Non-brand','Google Brand','Meta','Bing','Afiliados/Influenciadores','Orgânico','Outros']; // ordem da tabela de metas
 
+// ── CAC Blended de Meta (last-click + incremental) — coeficiente aprovado pelo board em 18/08/2026,
+// a partir de 54 semanas de regressão (documento "Como calcular o CAC real do Meta"). O Meta gera
+// cadastro por duas vias: direta (last-click, já contada em "Cadastros Reais") e indireta (a pessoa
+// vê o anúncio e depois busca "Jusfy" no Google — vira um cadastro REAL de Google Brand, que já é
+// contado lá). Por isso este é só uma MÉTRICA PARALELA (a pedido do usuário em 04/09/2026): não
+// altera "Cadastros Reais" nem nenhum total do resto do dashboard, só mostra um CAC alternativo do
+// canal Meta na tabela de Cadastro por Canal. Atualizar o coeficiente aqui quando o board revisar.
+const META_CAC_BLENDED_COEF_PER_1000 = 1.64; // cadastros incrementais estimados por R$1.000 investidos
+function metaCacBlended(spend, cadastrosRealLastClick) {
+  if (!spend) return null;
+  const incremental = (spend / 1000) * META_CAC_BLENDED_COEF_PER_1000;
+  const cadastrosBlended = (cadastrosRealLastClick || 0) + incremental;
+  return cadastrosBlended > 0 ? spend / cadastrosBlended : null;
+}
+
 // Classifica uma linha de cadastro real (jusfy_conversions_daily) num dos 8 "canais" desta aba —
 // reaproveita classifyRealConversionChannel (mesma função usada no Diário/Google/Meta/Bing, já
 // trata referral errado via utm_campaign+campaignLookup, e já resolve "Afiliados/Influenciadores"
@@ -296,14 +311,16 @@ function geralRenderCanal(data) {
         <div class="val">${fN(r.cadastros)}</div>
       </div>`).join('')}
     <div class="table-wrap" style="margin-top:16px"><table>
-      <thead><tr><th>Canal</th><th class="r">Cadastros</th><th class="r">Gasto</th><th class="r">CAC</th><th class="r">% do Total</th>${hasCmp?'<th class="r">Δ Cadastros</th>':''}</tr></thead>
+      <thead><tr><th>Canal</th><th class="r">Cadastros</th><th class="r">Gasto</th><th class="r">CAC</th><th class="r">CAC Blended*</th><th class="r">% do Total</th>${hasCmp?'<th class="r">Δ Cadastros</th>':''}</tr></thead>
       <tbody>${sorted.map(r => {
         const cmp = cmpByCanal ? cmpByCanal[r.canal] : undefined;
+        const blended = r.canal === 'Meta' ? metaCacBlended(r.spend, r.cadastros) : null;
         return `<tr>
           <td class="name-cell"><span class="swatch" style="background:${GERAL_CANAL_COLOR[r.canal]}"></span>${r.canal}</td>
           <td class="r">${fN(r.cadastros)}</td>
           <td class="r c-brand">${r.spend>0?fR(r.spend):'<span class="dim">—</span>'}</td>
           <td class="r">${r.cadastros>0&&r.spend>0?fR(r.spend/r.cadastros):'<span class="dim">—</span>'}</td>
+          <td class="r c-muted">${blended!=null?fR(blended):'<span class="dim">—</span>'}</td>
           <td class="r c-muted">${total>0?fP(r.cadastros/total*100):'—'}</td>
           ${hasCmp?`<td class="r">${cmp!=null?deltaHtml(r.cadastros,cmp):'<span class="d-neu">novo</span>'}</td>`:''}
         </tr>`;
@@ -313,11 +330,13 @@ function geralRenderCanal(data) {
         <td class="r"><strong>${fN(total)}</strong></td>
         <td class="r c-brand"><strong>${fR(sorted.reduce((s,r)=>s+r.spend,0))}</strong></td>
         <td class="r"></td>
+        <td class="r"></td>
         <td class="r"><strong>100%</strong></td>
         ${hasCmp?'<td></td>':''}
       </tr>
       </tbody>
     </table></div>
+    <div class="section-note" style="margin-top:10px">*CAC Blended (só Meta) = investimento ÷ (cadastros last-click + cadastros incrementais estimados por busca de marca — coeficiente de ${META_CAC_BLENDED_COEF_PER_1000} cadastro a cada R$ 1.000 investidos, aprovado pelo board em 18/08/2026, sem a campanha de afiliados/influenciadores). Métrica paralela: não altera "Cadastros" nem nenhum outro total desta página. Referência agregada (54 semanas): CAC blended de R$ 437 (intervalo de confiança R$ 294–849) — leia o número do período selecionado com essa margem em mente.</div>
   </div>`;
 }
 
