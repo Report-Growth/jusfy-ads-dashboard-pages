@@ -120,9 +120,13 @@ function renderMetaCampanhasFilterChange() {
 // de gasto+cadastros reais só dos grupos de campanha marcados. Nada selecionado = total combinado
 // (reaproveita o gráfico já calculado, igual ao comportamento de antes).
 function renderMetaChart() {
-  const { dailyChart, agg, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _metaData;
+  const titleEl = document.getElementById('m-chart-title');
+  if (titleEl) titleEl.innerHTML = chartTitleWithGranularity('Investimento', 'masc', ' × Cadastros Reais', 'renderMetaChart');
+
+  const { agg, spendByDate: baseSpend, channelConvMap, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _metaData;
   const selected = msState('metaCampFilter').selected;
-  let series = dailyChart;
+  const gran = currentChartGranularity();
+  let series = buildComboChartSeries(S.start, S.end, baseSpend, channelConvMap, 'Meta Ads', gran);
 
   if (selected.size) {
     const matchingGids = new Set(agg.filter(r => selected.has(r.campaign_name)).map(r => r._groupId));
@@ -136,7 +140,7 @@ function renderMetaChart() {
       spendByDate[d] = s;
       convByDate[d] = { sel: c };
     }
-    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel');
+    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel', gran);
   }
 
   renderComboChart('metaChart', series.labels, [{ label:'Meta Ads', data:series.spend, backgroundColor:'#017858' }], [
@@ -158,7 +162,7 @@ function renderMetaCampanhas() {
   </div>
   <div class="kpi-grid cols-4" id="m-kpis" style="margin-bottom:20px"></div>
   <div class="card" style="margin-bottom:16px">
-    <div class="card-title">Investimento Diário × Cadastros Reais</div>
+    <div class="card-title" id="m-chart-title"></div>
     <div style="height:300px;position:relative">
       ${dailyChart.labels.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="metaChart"></canvas>'}
     </div>
@@ -302,7 +306,7 @@ async function tabMeta() {
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'meta');
   const allDates = Object.keys(spendByDate);
 
-  _metaData = { agg, cmpAgg, cmpMap, hasCmp, dailyChart,
+  _metaData = { agg, cmpAgg, cmpMap, hasCmp, dailyChart, spendByDate, channelConvMap,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates };
 
   document.getElementById('content').innerHTML = `

@@ -70,7 +70,7 @@ function renderBingCampanhas() {
   </div>
   <div class="kpi-grid cols-4" id="bi-kpis" style="margin-bottom:20px"></div>
   <div class="card" style="margin-bottom:16px">
-    <div class="card-title">Investimento Diário × Cadastros Reais</div>
+    <div class="card-title" id="bi-chart-title"></div>
     <div style="height:300px;position:relative">
       ${_bingData.chart.labels.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="bingChart"></canvas>'}
     </div>
@@ -92,8 +92,12 @@ function renderBingCampanhas() {
 // de gasto+cadastros reais só dos grupos de campanha que passam no filtro. Sem filtro nenhum,
 // reaproveita o gráfico já calculado com o total combinado (mais barato e já testado).
 function renderBingChart() {
-  const { chart, agg, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _bingData;
-  let series = chart;
+  const titleEl = document.getElementById('bi-chart-title');
+  if (titleEl) titleEl.innerHTML = chartTitleWithGranularity('Investimento', 'masc', ' × Cadastros Reais', 'renderBingChart');
+
+  const { agg, spendByDate: baseSpend, channelConvMap, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _bingData;
+  const gran = currentChartGranularity();
+  let series = buildComboChartSeries(S.start, S.end, baseSpend, channelConvMap, 'Bing Ads', gran);
 
   if (_bingFilter || _bingCategoryFilter) {
     const matchingGids = new Set(
@@ -111,7 +115,7 @@ function renderBingChart() {
       spendByDate[d] = s;
       convByDate[d] = { sel: c };
     }
-    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel');
+    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel', gran);
   }
 
   renderComboChart('bingChart', series.labels, [{ label:'Bing Ads', data:series.spend, backgroundColor:'#017858' }], [
@@ -243,7 +247,7 @@ async function tabBing() {
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'bing_ads');
   const allDates = Object.keys(spendByDate);
 
-  _bingData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup,
+  _bingData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup, spendByDate, channelConvMap,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates };
   _bingFilter = null;
   _bingCategoryFilter = null;

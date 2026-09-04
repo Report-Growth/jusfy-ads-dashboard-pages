@@ -127,28 +127,21 @@ function clicksImprTotals(campRows, channelFilter, categoryFilter, weekdaySet) {
 
 // Série do gráfico diário de conversões — consolidado (investimento total, não separado por
 // plataforma), a partir das linhas já filtradas (canal/categoria/dia da semana) da tabela.
-function buildDiarioChartSeries(rows) {
-  const sorted = [...rows].sort((a, b) => a.date < b.date ? -1 : 1);
-  if (sorted.length <= 45) {
-    return {
-      labels: sorted.map(r => r.date.slice(5).split('-').reverse().join('/')),
-      spend:  sorted.map(r => r.spend),
-      conv:   sorted.map(r => r.conversions),
-      cac:    sorted.map(r => r.cac),
-    };
+// `granularity` omitida = automático por quantidade de linhas (comportamento histórico).
+function buildDiarioChartSeries(rows, granularity) {
+  const gran = granularity || (rows.length <= 45 ? 'dia' : 'mes');
+  const buckets = {};
+  for (const r of rows) {
+    const key = chartBucketKey(r.date, gran);
+    if (!buckets[key]) buckets[key] = { spend: 0, conv: 0 };
+    buckets[key].spend += r.spend;
+    buckets[key].conv  += r.conversions;
   }
-  const mMap = {};
-  for (const r of sorted) {
-    const mon = r.date.slice(0, 7);
-    if (!mMap[mon]) mMap[mon] = { spend: 0, conv: 0 };
-    mMap[mon].spend += r.spend;
-    mMap[mon].conv  += r.conversions;
-  }
-  const months = Object.keys(mMap).sort();
-  const spend = months.map(m => mMap[m].spend);
-  const conv  = months.map(m => mMap[m].conv);
+  const keys = Object.keys(buckets).sort();
+  const spend = keys.map(k => buckets[k].spend);
+  const conv  = keys.map(k => buckets[k].conv);
   return {
-    labels: months.map(mon => new Date(mon + '-15').toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })),
+    labels: keys.map(k => chartBucketLabel(k, gran)),
     spend, conv,
     cac: spend.map((s, i) => conv[i] > 0 ? s / conv[i] : null),
   };
@@ -225,7 +218,7 @@ function renderDiarioBody(filterChannel, filterCategory) {
   const cBiSpend = hasCmp ? platformSpendTotal(cmpCampsRaw, 'bing_ads',   _diarioChannelFilter, _diarioCategoryFilter, null) : undefined;
   const cTtSpend = hasCmp ? platformSpendTotal(cmpCampsRaw, 'tiktok_ads', _diarioChannelFilter, _diarioCategoryFilter, null) : undefined;
 
-  const chartSeries = buildDiarioChartSeries(rows);
+  const chartSeries = buildDiarioChartSeries(rows, currentChartGranularity());
 
   const st     = getSort('diario', 'date', 'desc');
   const sorted = sortRows(rows, st.key, st.dir);
@@ -289,7 +282,7 @@ function renderDiarioBody(filterChannel, filterCategory) {
   </div>
 
   <div class="card" style="margin-bottom:16px">
-    <div class="card-title">Conversões Diárias (Consolidado)</div>
+    <div class="card-title">${chartTitleWithGranularity('Conversões', 'fem_pl', ' (Consolidado)', 'renderDiarioBody')}</div>
     <div style="height:300px;position:relative">
       ${chartSeries.labels.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="diarioChart"></canvas>'}
     </div>

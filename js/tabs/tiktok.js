@@ -3,8 +3,12 @@ let _tiktokFilter = null;
 let _tiktokCategoryFilter = null;
 
 function renderTiktokChart() {
-  const { chart, agg, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _tiktokData;
-  let series = chart;
+  const titleEl = document.getElementById('tt-chart-title');
+  if (titleEl) titleEl.innerHTML = chartTitleWithGranularity('Investimento', 'masc', ' × Cadastros Reais', 'renderTiktokChart');
+
+  const { agg, spendByDate: baseSpend, channelConvMap, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _tiktokData;
+  const gran = currentChartGranularity();
+  let series = buildComboChartSeries(S.start, S.end, baseSpend, channelConvMap, 'TikTok Ads', gran);
 
   if (_tiktokFilter || _tiktokCategoryFilter) {
     const matchingGids = new Set(
@@ -22,7 +26,7 @@ function renderTiktokChart() {
       spendByDate[d] = s;
       convByDate[d] = { sel: c };
     }
-    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel');
+    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel', gran);
   }
 
   renderComboChart('tiktokChart', series.labels, [{ label:'TikTok Ads', data:series.spend, backgroundColor:'#EE1D52' }], [
@@ -126,7 +130,7 @@ function renderTiktokBody() {
   </div>
   <div class="kpi-grid cols-4" id="tt-kpis" style="margin-bottom:20px"></div>
   <div class="card" style="margin-bottom:16px">
-    <div class="card-title">Investimento Diário × Cadastros Reais</div>
+    <div class="card-title" id="tt-chart-title"></div>
     <div style="height:300px;position:relative">
       ${_tiktokData.chart.labels.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="tiktokChart"></canvas>'}
     </div>
@@ -193,7 +197,7 @@ async function tabTiktok() {
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'tiktok_ads');
   const allDates = Object.keys(spendByDate);
 
-  _tiktokData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup,
+  _tiktokData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup, spendByDate, channelConvMap,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates };
   _tiktokFilter = null;
   _tiktokCategoryFilter = null;

@@ -70,7 +70,7 @@ function renderGoogleCampanhas() {
   </div>
   <div class="kpi-grid cols-4" id="g-kpis" style="margin-bottom:20px"></div>
   <div class="card" style="margin-bottom:16px">
-    <div class="card-title">Investimento Diário × Cadastros Reais</div>
+    <div class="card-title" id="g-chart-title"></div>
     <div style="height:300px;position:relative">
       ${_googleData.chart.labels.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="googleChart"></canvas>'}
     </div>
@@ -92,8 +92,12 @@ function renderGoogleCampanhas() {
 // de gasto+cadastros reais só dos grupos de campanha que passam no filtro. Sem filtro nenhum,
 // reaproveita o gráfico já calculado com o total combinado (mais barato e já testado).
 function renderGoogleChart() {
-  const { chart, agg, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _googleData;
-  let series = chart;
+  const titleEl = document.getElementById('g-chart-title');
+  if (titleEl) titleEl.innerHTML = chartTitleWithGranularity('Investimento', 'masc', ' × Cadastros Reais', 'renderGoogleChart');
+
+  const { agg, spendByDate: baseSpend, channelConvMap, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _googleData;
+  const gran = currentChartGranularity();
+  let series = buildComboChartSeries(S.start, S.end, baseSpend, channelConvMap, 'Google Ads', gran);
 
   if (_googleFilter || _googleCategoryFilter) {
     const matchingGids = new Set(
@@ -111,7 +115,7 @@ function renderGoogleChart() {
       spendByDate[d] = s;
       convByDate[d] = { sel: c };
     }
-    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel');
+    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel', gran);
   }
 
   renderComboChart('googleChart', series.labels, [{ label:'Google Ads', data:series.spend, backgroundColor:'#017858' }], [
@@ -244,7 +248,7 @@ async function tabGoogle() {
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'google_ads');
   const allDates = Object.keys(spendByDate);
 
-  _googleData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup,
+  _googleData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup, spendByDate, channelConvMap,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates };
   _googleFilter = null;
   _googleCategoryFilter = null;

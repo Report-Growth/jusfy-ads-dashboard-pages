@@ -9,8 +9,12 @@ let _afiliadosData = null;
 let _afiliadosFilter = null;
 
 function renderAfiliadosChart() {
-  const { chart, agg, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _afiliadosData;
-  let series = chart;
+  const titleEl = document.getElementById('af-chart-title');
+  if (titleEl) titleEl.innerHTML = chartTitleWithGranularity('Investimento', 'masc', ' × Cadastros Reais', 'renderAfiliadosChart');
+
+  const { agg, spendByDate: baseSpend, channelConvMap, dailySpendByGroup: spendMap, dailyConvByGroup: convMap, allDates } = _afiliadosData;
+  const gran = currentChartGranularity();
+  let series = buildComboChartSeries(S.start, S.end, baseSpend, channelConvMap, 'Afiliados/Influenciadores', gran);
 
   if (_afiliadosFilter) {
     const matchingGids = new Set(agg.filter(r => r.campaign_name === _afiliadosFilter).map(r => r._groupId));
@@ -24,7 +28,7 @@ function renderAfiliadosChart() {
       spendByDate[d] = s;
       convByDate[d] = { sel: c };
     }
-    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel');
+    series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel', gran);
   }
 
   renderComboChart('afiliadosChart', series.labels, [{ label:'Afiliados/Influenciadores', data:series.spend, backgroundColor:'#41C78F' }], [
@@ -119,7 +123,7 @@ function renderAfiliadosBody() {
   <div class="section-note" style="margin-bottom:16px">Campanha de comissão por indicação (Meta Ads) — separada do restante do Meta Ads, pra não misturar custo/resultado de afiliados/influenciadores com o desempenho de mídia paga tradicional.</div>
   <div class="kpi-grid cols-4" id="af-kpis" style="margin-bottom:20px"></div>
   <div class="card" style="margin-bottom:16px">
-    <div class="card-title">Investimento Diário × Cadastros Reais</div>
+    <div class="card-title" id="af-chart-title"></div>
     <div style="height:300px;position:relative">
       ${_afiliadosData.chart.labels.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="afiliadosChart"></canvas>'}
     </div>
@@ -187,7 +191,7 @@ async function tabAfiliados() {
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'meta');
   const allDates = Object.keys(spendByDate);
 
-  _afiliadosData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup,
+  _afiliadosData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup, spendByDate, channelConvMap,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates };
   _afiliadosFilter = null;
   registerSortRenderer('afiliados', () => renderAfiliadosTable());

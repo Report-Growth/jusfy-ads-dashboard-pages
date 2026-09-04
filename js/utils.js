@@ -173,35 +173,85 @@ function aggregateDailyRealConversionsByChannel(rows, campaignLookup) {
   return byDate;
 }
 
-// Constrói labels (dia ou mês, dependendo do range) e arrays alinhados de gasto+conversões,
-// pra alimentar renderComboChart. platformSpendMap: {date: valor}. channelConvMap: {date:{canal:qtd}}.
-function buildComboChartSeries(start, end, platformSpendMap, channelConvMap, channelLabel) {
+// ── Seletor de granularidade do gráfico (Dia/Semana/Mês/Ano) — a pedido do usuário em 04/09/2026.
+// Estado compartilhado entre todos os gráficos do dash: mesmo período selecionado no topo → mesma
+// granularidade "automática" em todo lugar, e trocar num gráfico não perde a escolha ao trocar de
+// aba. Troca só reagrupa os dados diários já carregados (buildComboChartSeries), não busca nada de
+// novo — por isso os tabs guardam os mapas por data (spendByDate/channelConvMap) e reconstroem a
+// série a cada troca, em vez de guardar só a série já pronta.
+let _chartGranularity = null; // null = automático (ver chartAutoGranularity)
+const CHART_GRANULARITIES = [['dia','Dia'],['semana','Semana'],['mes','Mês'],['ano','Ano']];
+// Duas concordâncias porque os títulos dos cards usam o adjetivo de jeitos diferentes
+// ("Investimento Diário" masc. sing. vs "Conversões Diárias" fem. plural).
+const CHART_GRAN_ADJ = {
+  masc:   { dia:'Diário',  semana:'Semanal',  mes:'Mensal',  ano:'Anual'  },
+  fem_pl: { dia:'Diárias', semana:'Semanais', mes:'Mensais', ano:'Anuais' },
+};
+
+function chartAutoGranularity() {
+  const diffDays = (new Date(S.end) - new Date(S.start)) / 864e5;
+  return diffDays <= 45 ? 'dia' : 'mes';
+}
+function currentChartGranularity() { return _chartGranularity || chartAutoGranularity(); }
+
+function setChartGranularity(gran, rerenderFnName) {
+  _chartGranularity = gran;
+  const fn = window[rerenderFnName];
+  if (typeof fn === 'function') fn();
+}
+
+function renderGranularityPicker(rerenderFnName) {
+  const current = currentChartGranularity();
+  return `<div class="gran-picker">${CHART_GRANULARITIES.map(([val,label]) => `
+    <button type="button" class="gran-btn${val===current?' active':''}" onclick="setChartGranularity('${val}','${rerenderFnName}')">${label}</button>
+  `).join('')}</div>`;
+}
+
+// Título do card do gráfico (com o adjetivo de granularidade embutido) + o seletor, prontos pro
+// container flex de `.card-title`. `adjForm` é 'masc' ou 'fem_pl' (ver CHART_GRAN_ADJ acima).
+function chartTitleWithGranularity(prefix, adjForm, suffix, rerenderFnName) {
+  const adj = CHART_GRAN_ADJ[adjForm][currentChartGranularity()];
+  return `<span>${prefix} ${adj}${suffix}</span>${renderGranularityPicker(rerenderFnName)}`;
+}
+
+// Chave de agrupamento por granularidade (usada tanto pro bucket quanto, ordenada, pro eixo x).
+function chartBucketKey(dateStr, granularity) {
+  if (granularity === 'ano') return dateStr.slice(0,4);
+  if (granularity === 'mes') return dateStr.slice(0,7);
+  if (granularity === 'semana') {
+    const d = new Date(dateStr+'T12:00:00');
+    return fmt(addDays(d, -d.getDay())); // domingo daquela semana (mesma convenção de WEEKDAY_LABELS)
+  }
+  return dateStr; // dia
+}
+function chartBucketLabel(key, granularity) {
+  if (granularity === 'ano') return key;
+  if (granularity === 'mes') return new Date(key+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+  return key.slice(5).split('-').reverse().join('/'); // dia e semana (semana = data do domingo)
+}
+
+// Constrói labels e arrays alinhados de gasto+conversões, pra alimentar renderComboChart.
+// platformSpendMap: {date: valor}. channelConvMap: {date:{canal:qtd}}. `granularity` omitido =
+// automático (ver chartAutoGranularity — mantém o comportamento histórico pra quem ainda não usa
+// o seletor).
+function buildComboChartSeries(start, end, platformSpendMap, channelConvMap, channelLabel, granularity) {
   const days = Object.keys(platformSpendMap).sort();
-  const diffDays = (new Date(end) - new Date(start)) / 864e5;
+  const gran = granularity || (((new Date(end) - new Date(start)) / 864e5) <= 45 ? 'dia' : 'mes');
 
   const cacOf = (spend, conv) => conv > 0 ? spend / conv : null;
 
-  if (diffDays <= 45) {
-    const spend = days.map(d => platformSpendMap[d] || 0);
-    const conv  = days.map(d => (channelConvMap[d] && channelConvMap[d][channelLabel]) || 0);
-    return {
-      labels: days.map(d => d.slice(5).split('-').reverse().join('/')),
-      spend, conv,
-      cac: spend.map((s,i) => cacOf(s, conv[i])),
-    };
-  }
-  const mMap = {};
+  const buckets = {};
   for (const d of days) {
-    const mon = d.slice(0,7);
-    if (!mMap[mon]) mMap[mon] = { spend:0, conv:0 };
-    mMap[mon].spend += (platformSpendMap[d] || 0);
-    mMap[mon].conv  += (channelConvMap[d] && channelConvMap[d][channelLabel]) || 0;
+    const key = chartBucketKey(d, gran);
+    if (!buckets[key]) buckets[key] = { spend:0, conv:0 };
+    buckets[key].spend += (platformSpendMap[d] || 0);
+    buckets[key].conv  += (channelConvMap[d] && channelConvMap[d][channelLabel]) || 0;
   }
-  const months = Object.keys(mMap).sort();
-  const spend = months.map(mon => mMap[mon].spend);
-  const conv  = months.map(mon => mMap[mon].conv);
+  const keys = Object.keys(buckets).sort();
+  const spend = keys.map(k => buckets[k].spend);
+  const conv  = keys.map(k => buckets[k].conv);
   return {
-    labels: months.map(mon => new Date(mon+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})),
+    labels: keys.map(k => chartBucketLabel(k, gran)),
     spend, conv,
     cac: spend.map((s,i) => cacOf(s, conv[i])),
   };
