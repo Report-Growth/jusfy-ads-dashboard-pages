@@ -197,16 +197,38 @@ function buildKeywordCampaignAliases(lookup) {
   return aliases;
 }
 
-// Monta o índice de agrupamento de campanhas (mesma feature compartilhada por >1 campanha do
-// período vira um grupo só, ex: jusfinder/jusfinder_oabrj/variante de teste) — extraído de
-// mergeRealConversions pra ser reaproveitado também na quebra DIÁRIA (gráfico filtrado por
-// campanha, ver dailyRealConversionsByGroup/dailySpendByGroup em utils.js).
+// Campanhas do mesmo produto/feature agora coexistem com objetivo de otimização diferente
+// (ex: google_nonbrand_vendas_search_jusprocessos e google_nonbrand_leads_search_jusprocessos,
+// introduzido em 25/09/2026) — sem essa distinção, o agrupamento abaixo juntava as duas numa
+// única linha "🔗 jusprocessos (2 campanhas agregadas)" só por compartilharem a feature, apesar
+// de serem campanhas com nome, spend e objetivo completamente distintos no Google/Meta/Bing Ads.
+// Quando o nome carrega "vendas"/"leads", isso vira parte da chave de agrupamento — features que
+// só existem num objetivo continuam se comportando exatamente como antes (chave sem prefixo).
+function campaignIntent(name) {
+  if (/(^|_)vendas(_|$)/.test(name)) return 'vendas';
+  if (/(^|_)leads(_|$)/.test(name))  return 'leads';
+  return null;
+}
+const featureKeyFor = (name, kw) => { const intent = campaignIntent(name); return intent ? `${intent}:${kw}` : kw; };
+// Só pra exibição — desfaz o prefixo "vendas:"/"leads:" da chave interna em algo legível no nome
+// agregado da tabela (ex: "vendas:jusprocessos" -> "jusprocessos (Vendas)").
+function formatGroupLabel(gid) {
+  const m = /^(vendas|leads):(.+)$/.exec(gid);
+  return m ? `${m[2]} (${m[1] === 'vendas' ? 'Vendas' : 'Leads'})` : gid;
+}
+
+// Monta o índice de agrupamento de campanhas (mesma feature + mesmo objetivo vendas/leads
+// compartilhado por >1 campanha do período vira um grupo só, ex: jusfinder/jusfinder_oabrj/
+// variante de teste, todas de vendas) — extraído de mergeRealConversions pra ser reaproveitado
+// também na quebra DIÁRIA (gráfico filtrado por campanha, ver
+// dailyRealConversionsByGroup/dailySpendByGroup em utils.js).
 function buildCampaignGroupIndex(campaignRows, platformKey) {
   const pattern = PLATFORM_REFERRAL_PATTERNS[platformKey];
   const nameLower  = c => (c.campaign_name||'').toLowerCase();
-  const keywordsOf = c => FEATURE_KEYWORDS.filter(k => nameLower(c).includes(k));
+  const keywordsOf = c => { const name = nameLower(c); return FEATURE_KEYWORDS.filter(k => name.includes(k)).map(k => featureKeyFor(name, k)); };
 
-  // keyword -> campanhas (do período atual) cujo nome contém essa keyword
+  // keyword (com prefixo vendas:/leads: quando aplicável) -> campanhas (do período atual) cujo
+  // nome contém essa keyword E compartilha o mesmo objetivo
   const keywordToCampaigns = {};
   campaignRows.forEach(c => keywordsOf(c).forEach(k => {
     (keywordToCampaigns[k] = keywordToCampaigns[k] || []).push(c);
@@ -241,7 +263,14 @@ function buildCampaignGroupIndex(campaignRows, platformKey) {
       if (!referralPointsElsewhere) return groupIdOf(exact);
     }
     if (!pattern.test(referral||'')) return null;
-    const candidates = FEATURE_KEYWORDS.filter(k => lower.includes(k) && keywordToCampaigns[k]);
+    // Mesmo prefixo vendas:/leads: usado no índice — deriva a intenção do próprio utm_campaign
+    // do Metabase quando ele carrega "vendas"/"leads" no nome (caso normal); se não carregar,
+    // fica genuinamente ambíguo entre vendas e leads e não tenta adivinhar (fica sem match, cai
+    // no aviso "sem campanha correspondente" — mais honesto que juntar as duas às cegas).
+    const candidates = FEATURE_KEYWORDS
+      .filter(k => lower.includes(k))
+      .map(k => featureKeyFor(lower, k))
+      .filter(k => keywordToCampaigns[k]);
     if (candidates.length > 1) {
       console.warn(`[realConv] utm_campaign "${utm}" ambíguo entre features: ${candidates.join(', ')} — usando "${candidates[0]}"`);
     }
@@ -279,7 +308,7 @@ function mergeRealConversions(campaignRows, conversionRows, platformKey) {
     const base = members.length === 1
       ? { ...members[0] }
       : {
-          campaign_name: `🔗 ${gid} (${members.length} campanhas agregadas)`,
+          campaign_name: `🔗 ${formatGroupLabel(gid)} (${members.length} campanhas agregadas)`,
           spend:       sum(members, 'spend'),
           clicks:      sum(members, 'clicks'),
           impressions: sum(members, 'impressions'),
