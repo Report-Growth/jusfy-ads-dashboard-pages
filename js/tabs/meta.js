@@ -13,6 +13,7 @@ function metaSubtabBtn(id, label) {
 function renderMetaSubtabs() {
   return `<div style="display:flex;gap:8px;margin-bottom:20px">
     ${metaSubtabBtn('campanhas', 'Campanhas')}
+    ${metaSubtabBtn('leads', 'Leads')}
     ${metaSubtabBtn('fundo', 'Criativos Fundo')}
     ${metaSubtabBtn('topo', 'Criativos Topo')}
   </div>`;
@@ -81,6 +82,7 @@ async function switchMetaSubTab(id) {
   document.getElementById('m-subtabs').innerHTML = renderMetaSubtabs();
   const body = document.getElementById('m-subtab-body');
   if (id === 'campanhas') { renderMetaCampanhas(); return; }
+  if (id === 'leads') { renderMetaLeads(); return; }
 
   body.innerHTML = `<div class="loading"><div class="spinner"></div>Carregando criativos…</div>`;
   const cached = _metaCreativos[id];
@@ -246,6 +248,113 @@ function renderMetaTable() {
   ` : '';
 }
 
+// Sub-aba "Leads" — mesmo padrão de renderGoogleLeads*/renderBingLeads* (google.js/bing.js):
+// mostra só as campanhas com "leads" na nomenclatura (ex: meta_leads_fundo), calculadas à parte
+// em tabMeta() a partir de aggRaw (já sem afiliados, ver isMetaAdsCamp), sem afetar a aba
+// Campanhas.
+function renderMetaLeads() {
+  document.getElementById('m-subtab-body').innerHTML = `
+  <div class="kpi-grid cols-4" id="ml-kpis" style="margin-bottom:20px"></div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title" id="ml-chart-title"></div>
+    <div style="height:300px;position:relative">
+      ${_metaData.leadsAgg.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="metaLeadsChart"></canvas>'}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Meta Ads — Leads (${disp(S.start)} → ${disp(S.end)})</div>
+    <div class="table-wrap"><table>
+      <thead><tr id="ml-thead"></tr></thead>
+      <tbody id="ml-tbody"></tbody>
+      <tfoot><tr id="ml-tfoot" style="border-top:2px solid #E7E8EC;background:#ffffff"></tr></tfoot>
+    </table></div>
+  </div>`;
+
+  registerSortRenderer('meta-leads', () => renderMetaLeadsTable());
+  renderMetaLeadsTable();
+  renderMetaLeadsChart();
+}
+
+function renderMetaLeadsChart() {
+  const titleEl = document.getElementById('ml-chart-title');
+  if (titleEl) titleEl.innerHTML = chartTitleWithGranularity('Investimento', 'masc', ' × Cadastros Reais', 'renderMetaLeadsChart');
+  if (!_metaData.leadsAgg.length) return;
+
+  const { leadsAgg, leadsSpendByGroup, leadsConvByGroup, allDates } = _metaData;
+  const gids = leadsAgg.map(r => r._groupId);
+  const gran = currentChartGranularity();
+  const { spendByDate, convByDate } = sumGroupMapsToSeries(gids, leadsSpendByGroup, leadsConvByGroup, allDates);
+  const series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel', gran);
+
+  renderComboChart('metaLeadsChart', series.labels, [{ label:'Meta Ads', data:series.spend, backgroundColor:'#017858' }], [
+    { label:'Cadastros Reais', data:series.conv, borderColor:'#41C78F', yAxisID:'y1' },
+    { label:'CAC', data:series.cac, borderColor:'#e05a69', yAxisID:'y', borderDash:[5,3] },
+  ]);
+}
+
+function renderMetaLeadsTable() {
+  if (!_metaData) return;
+  const { leadsAgg: filtered0, leadsCmpAgg: cmpFiltered, leadsCmpMap: cmpMap, leadsHasCmp: hasCmp } = _metaData;
+
+  const st = getSort('meta-leads', 'spend', 'desc');
+  const filtered = sortRows(filtered0, st.key, st.dir);
+
+  const totSpend = sum(filtered,'spend'), totClicks=sum(filtered,'clicks'), totConv=sum(filtered,'conversions');
+  const totImpr = sum(filtered,'impressions'), totSessions = sum(filtered,'sessions');
+  const totCTR = totImpr>0 ? totClicks/totImpr*100 : 0;
+  const totTx  = totSessions>0 ? totConv/totSessions*100 : 0;
+  const totCac = totConv>0 ? totSpend/totConv : null;
+  const cTotSpend = cmpFiltered.length ? sum(cmpFiltered,'spend')       : undefined;
+  const cTotClick = cmpFiltered.length ? sum(cmpFiltered,'clicks')      : undefined;
+  const cTotConv  = cmpFiltered.length ? sum(cmpFiltered,'conversions') : undefined;
+
+  document.getElementById('ml-kpis').innerHTML =
+    kpiCard('Investimento', totSpend, cTotSpend, fR, 'c-yellow') +
+    kpiCard('Cliques',      totClicks, cTotClick, fN, 'c-green') +
+    kpiCard('Cadastros Reais', totConv, cTotConv, fN, 'c-blue') +
+    kpiCard('CAC Real Médio', totConv>0?totSpend/totConv:null, (cTotConv&&cTotSpend&&cTotConv>0)?cTotSpend/cTotConv:undefined, fR, 'c-brand', true);
+
+  document.getElementById('ml-thead').innerHTML =
+    `<th>#</th>${sortTh('meta-leads','Campanha','campaign_name','asc','')}
+     ${sortTh('meta-leads','Gasto','spend')}${sortTh('meta-leads','Impressões','impressions')}
+     ${sortTh('meta-leads','Cliques','clicks')}${sortTh('meta-leads','Sessões','sessions')}
+     ${sortTh('meta-leads','CTR','ctr')}${sortTh('meta-leads','Tx Conversão','txConv')}
+     ${sortTh('meta-leads','Cadastros','conversions')}${sortTh('meta-leads','CAC Real','cpa')}
+     ${hasCmp?'<th class="r">Δ Gasto</th>':''}`;
+
+  document.getElementById('ml-tbody').innerHTML = filtered.length ? filtered.map((r,i) => {
+    const cmp    = cmpMap[r.campaign_name];
+    const cpaCls = r.cpa==null?'c-muted':r.cpa<60?'c-green':r.cpa<130?'c-yellow':'c-red';
+    return `<tr>
+      <td class="c-muted">${i+1}</td>
+      <td><strong>${r.campaign_name}</strong></td>
+      <td class="r c-brand">${fR(r.spend)}</td>
+      <td class="r c-muted">${fN(r.impressions)}</td>
+      <td class="r">${fN(r.clicks)}</td>
+      <td class="r">${fN(r.sessions)}</td>
+      <td class="r">${fP(r.ctr)}</td>
+      <td class="r">${fP(r.txConv)}</td>
+      <td class="r">${fN(r.conversions)}</td>
+      <td class="r ${cpaCls}">${r.cpa?fR(r.cpa):'—'}</td>
+      ${hasCmp?`<td class="r">${cmp?deltaHtml(r.spend,cmp.spend):'<span class="d-neu">novo</span>'}</td>`:''}
+    </tr>`;
+  }).join('') : emptyRow(hasCmp ? 11 : 10);
+
+  document.getElementById('ml-tfoot').innerHTML = filtered.length ? `
+    <td></td>
+    <td><strong>Total</strong></td>
+    <td class="r c-brand"><strong>${fR(totSpend)}</strong></td>
+    <td class="r"><strong>${fN(totImpr)}</strong></td>
+    <td class="r"><strong>${fN(totClicks)}</strong></td>
+    <td class="r"><strong>${fN(totSessions)}</strong></td>
+    <td class="r"><strong>${fP(totCTR)}</strong></td>
+    <td class="r"><strong>${fP(totTx)}</strong></td>
+    <td class="r"><strong>${fN(totConv)}</strong></td>
+    <td class="r c-brand"><strong>${totCac!=null?fR(totCac):'—'}</strong></td>
+    ${hasCmp?'<td></td>':''}
+  ` : '';
+}
+
 async function tabMeta() {
   loading();
   ensureCreativeModal();
@@ -306,8 +415,22 @@ async function tabMeta() {
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'meta');
   const allDates = Object.keys(spendByDate);
 
+  // Sub-aba "Leads" (ver renderMetaLeads*) — mesmo padrão de google.js/bing.js: recorte à parte,
+  // restrito só às campanhas com "leads" no nome (já sem afiliados, isMetaAdsCamp acima).
+  const isLeadsCamp = r => (r.campaign_name||'').toLowerCase().includes('leads');
+  const leadsAggRaw    = aggRaw.filter(isLeadsCamp);
+  const cmpLeadsAggRaw = cmpAggRaw.filter(isLeadsCamp);
+  const leadsAgg    = leadsAggRaw.length ? mergeRealConversions(leadsAggRaw, convRows, 'meta') : [];
+  const leadsCmpAgg = cmpLeadsAggRaw.length ? mergeRealConversions(cmpLeadsAggRaw, cmpConvRows, 'meta') : [];
+  const leadsCmpMap = Object.fromEntries(leadsCmpAgg.map(r=>[r.campaign_name,r]));
+  const leadsHasCmp = S.compare && leadsCmpAgg.length > 0;
+  const { groupIdOf: leadsGroupIdOf } = buildCampaignGroupIndex(leadsAggRaw, 'meta');
+  const leadsSpendByGroup = dailySpendByGroup(campsRaw.filter(r => isMetaAdsCamp(r) && isLeadsCamp(r)), leadsGroupIdOf);
+  const leadsConvByGroup  = dailyRealConversionsByGroup(convDaily, leadsAggRaw, 'meta');
+
   _metaData = { agg, cmpAgg, cmpMap, hasCmp, dailyChart, spendByDate, channelConvMap,
-    dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates };
+    dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates,
+    leadsAgg, leadsCmpAgg, leadsCmpMap, leadsHasCmp, leadsSpendByGroup, leadsConvByGroup };
 
   document.getElementById('content').innerHTML = `
     <div id="m-subtabs">${renderMetaSubtabs()}</div>

@@ -26,6 +26,7 @@ function googleSubtabBtn(id, label) {
 function renderGoogleSubtabs() {
   return `<div style="display:flex;gap:8px;margin-bottom:20px">
     ${googleSubtabBtn('campanhas', 'Campanhas')}
+    ${googleSubtabBtn('leads', 'Leads')}
     ${googleSubtabBtn('keywords', 'Palavras-chave')}
   </div>`;
 }
@@ -35,6 +36,7 @@ async function switchGoogleSubTab(id) {
   document.getElementById('go-subtabs').innerHTML = renderGoogleSubtabs();
   const body = document.getElementById('go-subtab-body');
   if (id === 'campanhas') { renderGoogleCampanhas(); return; }
+  if (id === 'leads') { renderGoogleLeads(); return; }
 
   body.innerHTML = `<div class="loading"><div class="spinner"></div>Carregando palavras-chave…</div>`;
   if (!_googleKeywords || _googleKeywords.start !== S.start || _googleKeywords.end !== S.end) {
@@ -196,6 +198,114 @@ function renderGoogleTable(filterCamp, filterCategory) {
   ` : '';
 }
 
+// Sub-aba "Leads" — mostra só as campanhas com "leads" na nomenclatura (ex:
+// google_nonbrand_leads_search_jusprocessos), separadas das campanhas de vendas mesmo quando
+// compartilham a mesma feature. Dados (agg/cmp/gráfico) calculados à parte em tabGoogle() a
+// partir de aggRaw, então não interfere na aba Campanhas (que continua agrupando por feature
+// sem distinguir vendas/leads — ver conversions-match.js).
+function renderGoogleLeads() {
+  document.getElementById('go-subtab-body').innerHTML = `
+  <div class="kpi-grid cols-4" id="gl-kpis" style="margin-bottom:20px"></div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title" id="gl-chart-title"></div>
+    <div style="height:300px;position:relative">
+      ${_googleData.leadsAgg.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="googleLeadsChart"></canvas>'}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Google Ads — Leads (${disp(S.start)} → ${disp(S.end)})</div>
+    <div class="table-wrap"><table>
+      <thead><tr id="gl-thead"></tr></thead>
+      <tbody id="gl-tbody"></tbody>
+      <tfoot><tr id="gl-tfoot" style="border-top:2px solid #E7E8EC;background:#ffffff"></tr></tfoot>
+    </table></div>
+  </div>`;
+
+  registerSortRenderer('google-leads', () => renderGoogleLeadsTable());
+  renderGoogleLeadsTable();
+  renderGoogleLeadsChart();
+}
+
+function renderGoogleLeadsChart() {
+  const titleEl = document.getElementById('gl-chart-title');
+  if (titleEl) titleEl.innerHTML = chartTitleWithGranularity('Investimento', 'masc', ' × Cadastros Reais', 'renderGoogleLeadsChart');
+  if (!_googleData.leadsAgg.length) return;
+
+  const { leadsAgg, leadsSpendByGroup, leadsConvByGroup, allDates } = _googleData;
+  const gids = leadsAgg.map(r => r._groupId);
+  const gran = currentChartGranularity();
+  const { spendByDate, convByDate } = sumGroupMapsToSeries(gids, leadsSpendByGroup, leadsConvByGroup, allDates);
+  const series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel', gran);
+
+  renderComboChart('googleLeadsChart', series.labels, [{ label:'Google Ads', data:series.spend, backgroundColor:'#017858' }], [
+    { label:'Cadastros Reais', data:series.conv, borderColor:'#41C78F', yAxisID:'y1' },
+    { label:'CAC', data:series.cac, borderColor:'#e05a69', yAxisID:'y', borderDash:[5,3] },
+  ]);
+}
+
+function renderGoogleLeadsTable() {
+  if (!_googleData) return;
+  const { leadsAgg: filtered0, leadsCmpAgg: cmpFiltered, leadsCmpMap: cmpMap, leadsHasCmp: hasCmp } = _googleData;
+
+  const st = getSort('google-leads', 'spend', 'desc');
+  const filtered = sortRows(filtered0, st.key, st.dir);
+
+  const totSpend = sum(filtered,'spend'), totClicks=sum(filtered,'clicks'), totConv=sum(filtered,'conversions');
+  const totImpr = sum(filtered,'impressions'), totSessions = sum(filtered,'sessions');
+  const totCTR = totImpr>0 ? totClicks/totImpr*100 : 0;
+  const totTx  = totSessions>0 ? totConv/totSessions*100 : 0;
+  const totCac = totConv>0 ? totSpend/totConv : null;
+  const cTotSpend = cmpFiltered.length ? sum(cmpFiltered,'spend')       : undefined;
+  const cTotClick = cmpFiltered.length ? sum(cmpFiltered,'clicks')      : undefined;
+  const cTotConv  = cmpFiltered.length ? sum(cmpFiltered,'conversions') : undefined;
+
+  document.getElementById('gl-kpis').innerHTML =
+    kpiCard('Investimento', totSpend, cTotSpend, fR, 'c-blue') +
+    kpiCard('Cliques',      totClicks, cTotClick, fN, 'c-green') +
+    kpiCard('Cadastros Reais', totConv, cTotConv, fN, 'c-yellow') +
+    kpiCard('CAC Real Médio', totConv>0?totSpend/totConv:null, (cTotConv&&cTotSpend&&cTotConv>0)?cTotSpend/cTotConv:undefined, fR, 'c-brand', true);
+
+  document.getElementById('gl-thead').innerHTML =
+    `<th>#</th>${sortTh('google-leads','Campanha','campaign_name','asc','')}
+     ${sortTh('google-leads','Gasto','spend')}${sortTh('google-leads','Impressões','impressions')}
+     ${sortTh('google-leads','Cliques','clicks')}${sortTh('google-leads','Sessões','sessions')}
+     ${sortTh('google-leads','CTR','ctr')}${sortTh('google-leads','Tx Conversão','txConv')}
+     ${sortTh('google-leads','Cadastros','conversions')}${sortTh('google-leads','CAC Real','cpa')}
+     ${hasCmp?'<th class="r">Δ Gasto</th>':''}`;
+
+  document.getElementById('gl-tbody').innerHTML = filtered.length ? filtered.map((r,i) => {
+    const cmp    = cmpMap[r.campaign_name];
+    const cpaCls = r.cpa==null?'c-muted':r.cpa<100?'c-green':r.cpa<200?'c-yellow':'c-red';
+    return `<tr>
+      <td class="c-muted">${i+1}</td>
+      <td><strong>${r.campaign_name}</strong></td>
+      <td class="r c-brand">${fR(r.spend)}</td>
+      <td class="r c-muted">${fN(r.impressions)}</td>
+      <td class="r">${fN(r.clicks)}</td>
+      <td class="r">${fN(r.sessions)}</td>
+      <td class="r">${fP(r.ctr)}</td>
+      <td class="r">${fP(r.txConv)}</td>
+      <td class="r">${fN(r.conversions)}</td>
+      <td class="r ${cpaCls}">${r.cpa?fR(r.cpa):'—'}</td>
+      ${hasCmp?`<td class="r">${cmp?deltaHtml(r.spend,cmp.spend):'<span class="d-neu">novo</span>'}</td>`:''}
+    </tr>`;
+  }).join('') : emptyRow(hasCmp ? 11 : 10);
+
+  document.getElementById('gl-tfoot').innerHTML = filtered.length ? `
+    <td></td>
+    <td><strong>Total</strong></td>
+    <td class="r c-brand"><strong>${fR(totSpend)}</strong></td>
+    <td class="r"><strong>${fN(totImpr)}</strong></td>
+    <td class="r"><strong>${fN(totClicks)}</strong></td>
+    <td class="r"><strong>${fN(totSessions)}</strong></td>
+    <td class="r"><strong>${fP(totCTR)}</strong></td>
+    <td class="r"><strong>${fP(totTx)}</strong></td>
+    <td class="r"><strong>${fN(totConv)}</strong></td>
+    <td class="r c-brand"><strong>${totCac!=null?fR(totCac):'—'}</strong></td>
+    ${hasCmp?'<td></td>':''}
+  ` : '';
+}
+
 async function tabGoogle() {
   loading();
   _googleSubTab = 'campanhas';
@@ -248,8 +358,25 @@ async function tabGoogle() {
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'google_ads');
   const allDates = Object.keys(spendByDate);
 
+  // Sub-aba "Leads" (ver renderGoogleLeads*): recorte à parte, restrito só às campanhas com
+  // "leads" no nome — calculado sobre esse subconjunto (não sobre `aggRaw` inteiro), então o
+  // agrupamento por feature em buildCampaignGroupIndex só pode juntar campanhas de leads entre
+  // si, nunca com uma campanha de vendas que só existe fora desse recorte. Continua funcionando
+  // mesmo com o Google revertido pro agrupamento antigo (ver conversions-match.js).
+  const isLeadsCamp = r => (r.campaign_name||'').toLowerCase().includes('leads');
+  const leadsAggRaw    = aggRaw.filter(isLeadsCamp);
+  const cmpLeadsAggRaw = cmpAggRaw.filter(isLeadsCamp);
+  const leadsAgg    = leadsAggRaw.length ? mergeRealConversions(leadsAggRaw, convRows, 'google_ads') : [];
+  const leadsCmpAgg = cmpLeadsAggRaw.length ? mergeRealConversions(cmpLeadsAggRaw, cmpConvRows, 'google_ads') : [];
+  const leadsCmpMap = Object.fromEntries(leadsCmpAgg.map(r=>[r.campaign_name,r]));
+  const leadsHasCmp = S.compare && leadsCmpAgg.length > 0;
+  const { groupIdOf: leadsGroupIdOf } = buildCampaignGroupIndex(leadsAggRaw, 'google_ads');
+  const leadsSpendByGroup = dailySpendByGroup(campsRaw.filter(r => r.platform === 'google_ads' && isLeadsCamp(r)), leadsGroupIdOf);
+  const leadsConvByGroup  = dailyRealConversionsByGroup(convDaily, leadsAggRaw, 'google_ads');
+
   _googleData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup, spendByDate, channelConvMap,
-    dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates };
+    dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates,
+    leadsAgg, leadsCmpAgg, leadsCmpMap, leadsHasCmp, leadsSpendByGroup, leadsConvByGroup };
   _googleFilter = null;
   _googleCategoryFilter = null;
   registerSortRenderer('google', () => renderGoogleTable());

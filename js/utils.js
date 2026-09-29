@@ -257,6 +257,25 @@ function buildComboChartSeries(start, end, platformSpendMap, channelConvMap, cha
   };
 }
 
+// Soma mapas diário-por-grupo (dailySpendByGroup/dailyRealConversionsByGroup) num par de séries
+// planas dia->valor, restrito a um conjunto de groupIds — mesmo padrão usado pelo gráfico quando
+// o usuário filtra por campanha (ver renderGoogleChart etc.), reaproveitado pelas sub-abas "Leads"
+// (Google/Meta/Bing), que sempre mostram o total do recorte já restrito a campanhas com "leads" no
+// nome (sem filtro adicional de campanha).
+function sumGroupMapsToSeries(gids, spendByGroupMap, convByGroupMap, allDates) {
+  const spendByDate = {}, convByDate = {};
+  for (const d of allDates) {
+    let s = 0, c = 0;
+    for (const gid of gids) {
+      s += (spendByGroupMap[d] && spendByGroupMap[d][gid]) || 0;
+      c += (convByGroupMap[d]  && convByGroupMap[d][gid])  || 0;
+    }
+    spendByDate[d] = s;
+    convByDate[d] = { sel: c };
+  }
+  return { spendByDate, convByDate };
+}
+
 // Raw — mantidos para compatibilidade (criativos ainda precisam de linha por linha)
 async function fetchCamps(s, e) {
   return supa(`campaign_daily?select=*&date=gte.${s}&date=lte.${e}&order=date.asc`);

@@ -26,6 +26,7 @@ function bingSubtabBtn(id, label) {
 function renderBingSubtabs() {
   return `<div style="display:flex;gap:8px;margin-bottom:20px">
     ${bingSubtabBtn('campanhas', 'Campanhas')}
+    ${bingSubtabBtn('leads', 'Leads')}
     ${bingSubtabBtn('keywords', 'Palavras-chave')}
   </div>`;
 }
@@ -35,6 +36,7 @@ async function switchBingSubTab(id) {
   document.getElementById('bi-subtabs').innerHTML = renderBingSubtabs();
   const body = document.getElementById('bi-subtab-body');
   if (id === 'campanhas') { renderBingCampanhas(); return; }
+  if (id === 'leads') { renderBingLeads(); return; }
 
   body.innerHTML = `<div class="loading"><div class="spinner"></div>Carregando palavras-chave…</div>`;
   if (!_bingKeywords || _bingKeywords.start !== S.start || _bingKeywords.end !== S.end) {
@@ -196,6 +198,112 @@ function renderBingTable(filterCamp, filterCategory) {
   ` : '';
 }
 
+// Sub-aba "Leads" — mesmo padrão de renderGoogleLeads* (google.js): mostra só as campanhas com
+// "leads" na nomenclatura, calculadas à parte em tabBing() a partir de aggRaw, sem afetar a aba
+// Campanhas.
+function renderBingLeads() {
+  document.getElementById('bi-subtab-body').innerHTML = `
+  <div class="kpi-grid cols-4" id="bl-kpis" style="margin-bottom:20px"></div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title" id="bl-chart-title"></div>
+    <div style="height:300px;position:relative">
+      ${_bingData.leadsAgg.length===0 ? '<div class="c-muted" style="text-align:center;padding:40px;font-size:13px">Sem dados</div>' : '<canvas id="bingLeadsChart"></canvas>'}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Bing Ads — Leads (${disp(S.start)} → ${disp(S.end)})</div>
+    <div class="table-wrap"><table>
+      <thead><tr id="bl-thead"></tr></thead>
+      <tbody id="bl-tbody"></tbody>
+      <tfoot><tr id="bl-tfoot" style="border-top:2px solid #E7E8EC;background:#ffffff"></tr></tfoot>
+    </table></div>
+  </div>`;
+
+  registerSortRenderer('bing-leads', () => renderBingLeadsTable());
+  renderBingLeadsTable();
+  renderBingLeadsChart();
+}
+
+function renderBingLeadsChart() {
+  const titleEl = document.getElementById('bl-chart-title');
+  if (titleEl) titleEl.innerHTML = chartTitleWithGranularity('Investimento', 'masc', ' × Cadastros Reais', 'renderBingLeadsChart');
+  if (!_bingData.leadsAgg.length) return;
+
+  const { leadsAgg, leadsSpendByGroup, leadsConvByGroup, allDates } = _bingData;
+  const gids = leadsAgg.map(r => r._groupId);
+  const gran = currentChartGranularity();
+  const { spendByDate, convByDate } = sumGroupMapsToSeries(gids, leadsSpendByGroup, leadsConvByGroup, allDates);
+  const series = buildComboChartSeries(S.start, S.end, spendByDate, convByDate, 'sel', gran);
+
+  renderComboChart('bingLeadsChart', series.labels, [{ label:'Bing Ads', data:series.spend, backgroundColor:'#017858' }], [
+    { label:'Cadastros Reais', data:series.conv, borderColor:'#41C78F', yAxisID:'y1' },
+    { label:'CAC', data:series.cac, borderColor:'#e05a69', yAxisID:'y', borderDash:[5,3] },
+  ]);
+}
+
+function renderBingLeadsTable() {
+  if (!_bingData) return;
+  const { leadsAgg: filtered0, leadsCmpAgg: cmpFiltered, leadsCmpMap: cmpMap, leadsHasCmp: hasCmp } = _bingData;
+
+  const st = getSort('bing-leads', 'spend', 'desc');
+  const filtered = sortRows(filtered0, st.key, st.dir);
+
+  const totSpend = sum(filtered,'spend'), totClicks=sum(filtered,'clicks'), totConv=sum(filtered,'conversions');
+  const totImpr = sum(filtered,'impressions'), totSessions = sum(filtered,'sessions');
+  const totCTR = totImpr>0 ? totClicks/totImpr*100 : 0;
+  const totTx  = totSessions>0 ? totConv/totSessions*100 : 0;
+  const totCac = totConv>0 ? totSpend/totConv : null;
+  const cTotSpend = cmpFiltered.length ? sum(cmpFiltered,'spend')       : undefined;
+  const cTotClick = cmpFiltered.length ? sum(cmpFiltered,'clicks')      : undefined;
+  const cTotConv  = cmpFiltered.length ? sum(cmpFiltered,'conversions') : undefined;
+
+  document.getElementById('bl-kpis').innerHTML =
+    kpiCard('Investimento', totSpend, cTotSpend, fR, 'c-blue') +
+    kpiCard('Cliques',      totClicks, cTotClick, fN, 'c-green') +
+    kpiCard('Cadastros Reais', totConv, cTotConv, fN, 'c-yellow') +
+    kpiCard('CAC Real Médio', totConv>0?totSpend/totConv:null, (cTotConv&&cTotSpend&&cTotConv>0)?cTotSpend/cTotConv:undefined, fR, 'c-brand', true);
+
+  document.getElementById('bl-thead').innerHTML =
+    `<th>#</th>${sortTh('bing-leads','Campanha','campaign_name','asc','')}
+     ${sortTh('bing-leads','Gasto','spend')}${sortTh('bing-leads','Impressões','impressions')}
+     ${sortTh('bing-leads','Cliques','clicks')}${sortTh('bing-leads','Sessões','sessions')}
+     ${sortTh('bing-leads','CTR','ctr')}${sortTh('bing-leads','Tx Conversão','txConv')}
+     ${sortTh('bing-leads','Cadastros','conversions')}${sortTh('bing-leads','CAC Real','cpa')}
+     ${hasCmp?'<th class="r">Δ Gasto</th>':''}`;
+
+  document.getElementById('bl-tbody').innerHTML = filtered.length ? filtered.map((r,i) => {
+    const cmp    = cmpMap[r.campaign_name];
+    const cpaCls = r.cpa==null?'c-muted':r.cpa<100?'c-green':r.cpa<200?'c-yellow':'c-red';
+    return `<tr>
+      <td class="c-muted">${i+1}</td>
+      <td><strong>${r.campaign_name}</strong></td>
+      <td class="r c-brand">${fR(r.spend)}</td>
+      <td class="r c-muted">${fN(r.impressions)}</td>
+      <td class="r">${fN(r.clicks)}</td>
+      <td class="r">${fN(r.sessions)}</td>
+      <td class="r">${fP(r.ctr)}</td>
+      <td class="r">${fP(r.txConv)}</td>
+      <td class="r">${fN(r.conversions)}</td>
+      <td class="r ${cpaCls}">${r.cpa?fR(r.cpa):'—'}</td>
+      ${hasCmp?`<td class="r">${cmp?deltaHtml(r.spend,cmp.spend):'<span class="d-neu">novo</span>'}</td>`:''}
+    </tr>`;
+  }).join('') : emptyRow(hasCmp ? 11 : 10);
+
+  document.getElementById('bl-tfoot').innerHTML = filtered.length ? `
+    <td></td>
+    <td><strong>Total</strong></td>
+    <td class="r c-brand"><strong>${fR(totSpend)}</strong></td>
+    <td class="r"><strong>${fN(totImpr)}</strong></td>
+    <td class="r"><strong>${fN(totClicks)}</strong></td>
+    <td class="r"><strong>${fN(totSessions)}</strong></td>
+    <td class="r"><strong>${fP(totCTR)}</strong></td>
+    <td class="r"><strong>${fP(totTx)}</strong></td>
+    <td class="r"><strong>${fN(totConv)}</strong></td>
+    <td class="r c-brand"><strong>${totCac!=null?fR(totCac):'—'}</strong></td>
+    ${hasCmp?'<td></td>':''}
+  ` : '';
+}
+
 async function tabBing() {
   loading();
   _bingSubTab = 'campanhas';
@@ -247,8 +355,22 @@ async function tabBing() {
   const convByGroupMap = dailyRealConversionsByGroup(convDaily, aggRaw, 'bing_ads');
   const allDates = Object.keys(spendByDate);
 
+  // Sub-aba "Leads" (ver renderBingLeads*) — mesmo padrão de google.js: recorte à parte, restrito
+  // só às campanhas com "leads" no nome, calculado sobre esse subconjunto.
+  const isLeadsCamp = r => (r.campaign_name||'').toLowerCase().includes('leads');
+  const leadsAggRaw    = aggRaw.filter(isLeadsCamp);
+  const cmpLeadsAggRaw = cmpAggRaw.filter(isLeadsCamp);
+  const leadsAgg    = leadsAggRaw.length ? mergeRealConversions(leadsAggRaw, convRows, 'bing_ads') : [];
+  const leadsCmpAgg = cmpLeadsAggRaw.length ? mergeRealConversions(cmpLeadsAggRaw, cmpConvRows, 'bing_ads') : [];
+  const leadsCmpMap = Object.fromEntries(leadsCmpAgg.map(r=>[r.campaign_name,r]));
+  const leadsHasCmp = S.compare && leadsCmpAgg.length > 0;
+  const { groupIdOf: leadsGroupIdOf } = buildCampaignGroupIndex(leadsAggRaw, 'bing_ads');
+  const leadsSpendByGroup = dailySpendByGroup(campsRaw.filter(r => r.platform === 'bing_ads' && isLeadsCamp(r)), leadsGroupIdOf);
+  const leadsConvByGroup  = dailyRealConversionsByGroup(convDaily, leadsAggRaw, 'bing_ads');
+
   _bingData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup, spendByDate, channelConvMap,
-    dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates };
+    dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates,
+    leadsAgg, leadsCmpAgg, leadsCmpMap, leadsHasCmp, leadsSpendByGroup, leadsConvByGroup };
   _bingFilter = null;
   _bingCategoryFilter = null;
   registerSortRenderer('bing', () => renderBingTable());
