@@ -332,6 +332,65 @@ function mergeRealConversions(campaignRows, conversionRows, platformKey) {
   return out.sort((a,b) => b.spend - a.spend);
 }
 
+// Casa conversões reais (Metabase) com campanhas por NOME EXATO apenas — sem o fallback por
+// feature keyword de resolveGroupId/buildCampaignGroupIndex. Esse fallback é seguro quando
+// `campaignRows` cobre TODAS as campanhas reais da plataforma (uso normal em mergeRealConversions),
+// mas fica perigoso quando `campaignRows` é um recorte pequeno (ex: só campanhas de leads, ver
+// sub-aba "Leads" em google.js/meta.js/bing.js): uma conversão de uma campanha de VENDAS (fora do
+// recorte, sem match exato) acaba "roubada" pra dentro do recorte só por compartilhar a mesma
+// feature (ex: "jusprocessos") com a campanha de leads — inflava cadastros/CAC da sub-aba Leads de
+// forma bem visível (CAC de R$3-20 vs. R$200+ das campanhas de vendas). Descoberto em revisão do
+// usuário em 29/09/2026. Aqui, sem nome exato a conversão simplesmente fica de fora — mais
+// conservador, mas honesto (consistente com o "problema no rastreio" já conhecido nessas campanhas).
+function mergeLeadsRealConversions(campaignRows, conversionRows, platformKey) {
+  const byName = {};
+  campaignRows.forEach(c => { byName[(c.campaign_name||'').toLowerCase()] = c; });
+
+  const realByName = {};
+  for (const r of conversionRows||[]) {
+    const lower = (r.utm_campaign||'').trim().toLowerCase();
+    if (!lower || !byName[lower]) continue;
+    // Mesma regra de desempate de resolveGroupId: só aceita se o referral não apontar claramente
+    // pra outra plataforma paga (evita double count entre abas).
+    const referralPointsElsewhere = Object.entries(PLATFORM_REFERRAL_PATTERNS)
+      .some(([key, pat]) => key !== platformKey && pat.test(r.referral||''));
+    if (referralPointsElsewhere) continue;
+    realByName[lower] = (realByName[lower]||0) + (+r.clientes_unicos || 0);
+  }
+
+  return campaignRows.map(c => {
+    const key = (c.campaign_name||'').toLowerCase();
+    const conversions = realByName[key] || 0;
+    return {
+      ...c,
+      _groupId: `campaign:${key}`,
+      conversions,
+      cpa: conversions > 0 ? c.spend / conversions : null,
+      ctr: c.impressions > 0 ? c.clicks / c.impressions * 100 : 0,
+      txConv: c.sessions > 0 ? conversions / c.sessions * 100 : 0,
+    };
+  }).sort((a,b) => b.spend - a.spend);
+}
+
+// Versão diária de mergeLeadsRealConversions (mesmo match por nome exato, sem fallback por
+// feature) — alimenta o gráfico das sub-abas "Leads". Chave de saída (`campaign:<nome>`) bate com
+// o `_groupId` que mergeLeadsRealConversions coloca em cada linha, pra sumGroupMapsToSeries somar.
+function dailyLeadsRealConversions(convDailyRows, campaignRows, platformKey) {
+  const names = new Set(campaignRows.map(c => (c.campaign_name||'').toLowerCase()));
+  const byDate = {};
+  for (const r of convDailyRows || []) {
+    const lower = (r.utm_campaign||'').trim().toLowerCase();
+    if (!lower || !names.has(lower)) continue;
+    const referralPointsElsewhere = Object.entries(PLATFORM_REFERRAL_PATTERNS)
+      .some(([key, pat]) => key !== platformKey && pat.test(r.referral||''));
+    if (referralPointsElsewhere) continue;
+    const gid = `campaign:${lower}`;
+    if (!byDate[r.date]) byDate[r.date] = {};
+    byDate[r.date][gid] = (byDate[r.date][gid] || 0) + (+r.clientes_unicos || 0);
+  }
+  return byDate;
+}
+
 // Cadastros reais por dia, agrupados pelo mesmo groupId de mergeRealConversions — usado pra
 // filtrar o gráfico "Investimento Diário × Cadastros Reais" quando o usuário seleciona uma
 // campanha específica (por padrão o gráfico só mostra o total combinado de todas as campanhas).

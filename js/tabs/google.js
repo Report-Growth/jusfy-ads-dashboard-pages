@@ -366,13 +366,13 @@ async function tabGoogle() {
   const isLeadsCamp = r => (r.campaign_name||'').toLowerCase().includes('leads');
   const leadsAggRaw    = aggRaw.filter(isLeadsCamp);
   const cmpLeadsAggRaw = cmpAggRaw.filter(isLeadsCamp);
-  const leadsAgg    = leadsAggRaw.length ? mergeRealConversions(leadsAggRaw, convRows, 'google_ads') : [];
-  const leadsCmpAgg = cmpLeadsAggRaw.length ? mergeRealConversions(cmpLeadsAggRaw, cmpConvRows, 'google_ads') : [];
+  const leadsAgg    = mergeLeadsRealConversions(leadsAggRaw, convRows, 'google_ads');
+  const leadsCmpAgg = mergeLeadsRealConversions(cmpLeadsAggRaw, cmpConvRows, 'google_ads');
   const leadsCmpMap = Object.fromEntries(leadsCmpAgg.map(r=>[r.campaign_name,r]));
   const leadsHasCmp = S.compare && leadsCmpAgg.length > 0;
-  const { groupIdOf: leadsGroupIdOf } = buildCampaignGroupIndex(leadsAggRaw, 'google_ads');
+  const leadsGroupIdOf = r => 'campaign:' + (r.campaign_name||'').toLowerCase();
   const leadsSpendByGroup = dailySpendByGroup(campsRaw.filter(r => r.platform === 'google_ads' && isLeadsCamp(r)), leadsGroupIdOf);
-  const leadsConvByGroup  = dailyRealConversionsByGroup(convDaily, leadsAggRaw, 'google_ads');
+  const leadsConvByGroup  = dailyLeadsRealConversions(convDaily, leadsAggRaw, 'google_ads');
 
   _googleData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup, spendByDate, channelConvMap,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates,

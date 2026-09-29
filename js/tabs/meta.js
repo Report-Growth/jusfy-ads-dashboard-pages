@@ -420,13 +420,13 @@ async function tabMeta() {
   const isLeadsCamp = r => (r.campaign_name||'').toLowerCase().includes('leads');
   const leadsAggRaw    = aggRaw.filter(isLeadsCamp);
   const cmpLeadsAggRaw = cmpAggRaw.filter(isLeadsCamp);
-  const leadsAgg    = leadsAggRaw.length ? mergeRealConversions(leadsAggRaw, convRows, 'meta') : [];
-  const leadsCmpAgg = cmpLeadsAggRaw.length ? mergeRealConversions(cmpLeadsAggRaw, cmpConvRows, 'meta') : [];
+  const leadsAgg    = mergeLeadsRealConversions(leadsAggRaw, convRows, 'meta');
+  const leadsCmpAgg = mergeLeadsRealConversions(cmpLeadsAggRaw, cmpConvRows, 'meta');
   const leadsCmpMap = Object.fromEntries(leadsCmpAgg.map(r=>[r.campaign_name,r]));
   const leadsHasCmp = S.compare && leadsCmpAgg.length > 0;
-  const { groupIdOf: leadsGroupIdOf } = buildCampaignGroupIndex(leadsAggRaw, 'meta');
+  const leadsGroupIdOf = r => 'campaign:' + (r.campaign_name||'').toLowerCase();
   const leadsSpendByGroup = dailySpendByGroup(campsRaw.filter(r => isMetaAdsCamp(r) && isLeadsCamp(r)), leadsGroupIdOf);
-  const leadsConvByGroup  = dailyRealConversionsByGroup(convDaily, leadsAggRaw, 'meta');
+  const leadsConvByGroup  = dailyLeadsRealConversions(convDaily, leadsAggRaw, 'meta');
 
   _metaData = { agg, cmpAgg, cmpMap, hasCmp, dailyChart, spendByDate, channelConvMap,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates,

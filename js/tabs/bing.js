@@ -360,13 +360,13 @@ async function tabBing() {
   const isLeadsCamp = r => (r.campaign_name||'').toLowerCase().includes('leads');
   const leadsAggRaw    = aggRaw.filter(isLeadsCamp);
   const cmpLeadsAggRaw = cmpAggRaw.filter(isLeadsCamp);
-  const leadsAgg    = leadsAggRaw.length ? mergeRealConversions(leadsAggRaw, convRows, 'bing_ads') : [];
-  const leadsCmpAgg = cmpLeadsAggRaw.length ? mergeRealConversions(cmpLeadsAggRaw, cmpConvRows, 'bing_ads') : [];
+  const leadsAgg    = mergeLeadsRealConversions(leadsAggRaw, convRows, 'bing_ads');
+  const leadsCmpAgg = mergeLeadsRealConversions(cmpLeadsAggRaw, cmpConvRows, 'bing_ads');
   const leadsCmpMap = Object.fromEntries(leadsCmpAgg.map(r=>[r.campaign_name,r]));
   const leadsHasCmp = S.compare && leadsCmpAgg.length > 0;
-  const { groupIdOf: leadsGroupIdOf } = buildCampaignGroupIndex(leadsAggRaw, 'bing_ads');
+  const leadsGroupIdOf = r => 'campaign:' + (r.campaign_name||'').toLowerCase();
   const leadsSpendByGroup = dailySpendByGroup(campsRaw.filter(r => r.platform === 'bing_ads' && isLeadsCamp(r)), leadsGroupIdOf);
-  const leadsConvByGroup  = dailyRealConversionsByGroup(convDaily, leadsAggRaw, 'bing_ads');
+  const leadsConvByGroup  = dailyLeadsRealConversions(convDaily, leadsAggRaw, 'bing_ads');
 
   _bingData = { agg, cmpAgg, cmpMap, hasCmp, chart, campaignLookup, spendByDate, channelConvMap,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates,
