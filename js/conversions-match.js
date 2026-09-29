@@ -204,17 +204,19 @@ function buildKeywordCampaignAliases(lookup) {
 // spend e objetivo completamente distintos. Quando o nome carrega "vendas"/"leads", isso vira
 // parte da chave de agrupamento — features que só existem num objetivo continuam se comportando
 // exatamente como antes (chave sem prefixo).
-// ⚠️ Google Ads FICA DE FORA dessa distinção (revertido a pedido do usuário em 25/09/2026) —
-// problema no rastreamento das campanhas de leads lá torna a separação não confiável por ora;
-// Google volta a agrupar só pela feature crua, como era antes. Meta/Bing/TikTok continuam com o
-// split normalmente.
+// Google Ads tinha ficado de fora dessa distinção por um tempo (revertido em 25/09/2026, receio
+// sobre o rastreamento das campanhas de leads) — reaplicado em 29/09/2026 a pedido do usuário, já
+// com a matching mais conservadora (ver mergeLeadsRealConversions/29/09) provando que a separação
+// é segura: como `campaignIntent` só reconhece "vendas"/"leads" explícito no nome, um utm_campaign
+// AMBÍGUO do Metabase (sem essa palavra) nunca bate com nenhuma chave prefixada — fica sem match
+// (mais conservador) em vez de adivinhar, então não há risco de atribuir cadastro de vendas pra
+// leads (ou vice-versa) por engano. Mesmo comportamento agora em todas as plataformas.
 function campaignIntent(name) {
   if (/(^|_)vendas(_|$)/.test(name)) return 'vendas';
   if (/(^|_)leads(_|$)/.test(name))  return 'leads';
   return null;
 }
-const featureKeyFor = (name, kw, platformKey) => {
-  if (platformKey === 'google_ads') return kw;
+const featureKeyFor = (name, kw) => {
   const intent = campaignIntent(name);
   return intent ? `${intent}:${kw}` : kw;
 };
@@ -233,7 +235,7 @@ function formatGroupLabel(gid) {
 function buildCampaignGroupIndex(campaignRows, platformKey) {
   const pattern = PLATFORM_REFERRAL_PATTERNS[platformKey];
   const nameLower  = c => (c.campaign_name||'').toLowerCase();
-  const keywordsOf = c => { const name = nameLower(c); return FEATURE_KEYWORDS.filter(k => name.includes(k)).map(k => featureKeyFor(name, k, platformKey)); };
+  const keywordsOf = c => { const name = nameLower(c); return FEATURE_KEYWORDS.filter(k => name.includes(k)).map(k => featureKeyFor(name, k)); };
 
   // keyword (com prefixo vendas:/leads: quando aplicável) -> campanhas (do período atual) cujo
   // nome contém essa keyword E compartilha o mesmo objetivo
@@ -277,7 +279,7 @@ function buildCampaignGroupIndex(campaignRows, platformKey) {
     // no aviso "sem campanha correspondente" — mais honesto que juntar as duas às cegas).
     const candidates = FEATURE_KEYWORDS
       .filter(k => lower.includes(k))
-      .map(k => featureKeyFor(lower, k, platformKey))
+      .map(k => featureKeyFor(lower, k))
       .filter(k => keywordToCampaigns[k]);
     if (candidates.length > 1) {
       console.warn(`[realConv] utm_campaign "${utm}" ambíguo entre features: ${candidates.join(', ')} — usando "${candidates[0]}"`);
