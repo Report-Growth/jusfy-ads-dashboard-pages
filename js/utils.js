@@ -257,6 +257,24 @@ function buildComboChartSeries(start, end, platformSpendMap, channelConvMap, cha
   };
 }
 
+// Linha fixa (fora da ordenação) no fim das tabelas de campanha Google/Meta/Bing com os cadastros
+// do canal que não casam com nenhuma campanha — ver unmatchedRealConversions. Mostra os
+// utm_campaign mais frequentes embaixo do nome, e a lista completa no tooltip.
+function unmatchedRowHtml(unmatched, hasCmp) {
+  if (!unmatched || !unmatched.total) return '';
+  const names = unmatched.items.map(i => `${i.utm} (${i.clientes})`);
+  const preview = names.slice(0, 3).join(' · ') + (names.length > 3 ? ` · +${names.length - 3}` : '');
+  return `<tr title="${escHtml(names.join('\n'))}">
+    <td class="c-muted">—</td>
+    <td><strong>Sem campanha identificada</strong><div class="c-muted" style="font-size:11px;font-weight:400;margin-top:2px;max-width:520px">${escHtml(preview)}</div></td>
+    <td class="r c-muted">—</td><td class="r c-muted">—</td><td class="r c-muted">—</td>
+    <td class="r c-muted">—</td><td class="r c-muted">—</td><td class="r c-muted">—</td>
+    <td class="r">${fN(unmatched.total)}</td>
+    <td class="r c-muted">—</td>
+    ${hasCmp ? '<td></td>' : ''}
+  </tr>`;
+}
+
 // Soma mapas diário-por-grupo (dailySpendByGroup/dailyRealConversionsByGroup) num par de séries
 // planas dia->valor, restrito a um conjunto de groupIds — mesmo padrão usado pelo gráfico quando
 // o usuário filtra por campanha (ver renderGoogleChart etc.), reaproveitado pelas sub-abas "Leads"

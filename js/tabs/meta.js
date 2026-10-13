@@ -192,14 +192,19 @@ function renderMetaTable() {
   const st = getSort('meta', 'spend', 'desc');
   const filtered = sortRows(filtered0, st.key, st.dir);
 
-  const totSpend = sum(filtered,'spend'), totClicks=sum(filtered,'clicks'), totConv=sum(filtered,'conversions');
+  // Cadastros sem campanha identificada só entram sem campanha selecionada no filtro (ver google.js).
+  const showUnm = !selected.size;
+  const unm    = showUnm ? _metaData.unmatched    : null;
+  const cmpUnm = showUnm ? _metaData.cmpUnmatched : null;
+
+  const totSpend = sum(filtered,'spend'), totClicks=sum(filtered,'clicks'), totConv=sum(filtered,'conversions') + (unm ? unm.total : 0);
   const totImpr = sum(filtered,'impressions'), totSessions = sum(filtered,'sessions');
   const totCTR = totImpr>0 ? totClicks/totImpr*100 : 0;
   const totTx  = totSessions>0 ? totConv/totSessions*100 : 0;
   const totCac = totConv>0 ? totSpend/totConv : null;
   const cTotSpend = cmpFiltered.length ? sum(cmpFiltered,'spend')       : undefined;
   const cTotClick = cmpFiltered.length ? sum(cmpFiltered,'clicks')      : undefined;
-  const cTotConv  = cmpFiltered.length ? sum(cmpFiltered,'conversions') : undefined;
+  const cTotConv  = cmpFiltered.length ? sum(cmpFiltered,'conversions') + (cmpUnm ? cmpUnm.total : 0) : undefined;
 
   document.getElementById('m-kpis').innerHTML =
     kpiCard('Investimento', totSpend, cTotSpend, fR, 'c-yellow') +
@@ -231,9 +236,9 @@ function renderMetaTable() {
       <td class="r ${cpaCls}">${r.cpa?fR(r.cpa):'—'}</td>
       ${hasCmp?`<td class="r">${cmp?deltaHtml(r.spend,cmp.spend):'<span class="d-neu">novo</span>'}</td>`:''}
     </tr>`;
-  }).join('') : emptyRow(hasCmp ? 11 : 10);
+  }).join('') + unmatchedRowHtml(unm, hasCmp) : (unm && unm.total ? unmatchedRowHtml(unm, hasCmp) : emptyRow(hasCmp ? 11 : 10));
 
-  document.getElementById('m-tfoot').innerHTML = filtered.length ? `
+  document.getElementById('m-tfoot').innerHTML = (filtered.length || (unm && unm.total)) ? `
     <td></td>
     <td><strong>Total</strong></td>
     <td class="r c-brand"><strong>${fR(totSpend)}</strong></td>
@@ -363,7 +368,7 @@ async function tabMeta() {
   msReset('metaCreativeCamp_fundo'); msReset('metaCreativeAdset_fundo');
   msReset('metaCreativeCamp_topo');  msReset('metaCreativeAdset_topo');
 
-  const [campAgg, cmpCampAgg, ga4Camp, cmpGA4Camp, convRows, cmpConvRows, convDaily, campsRaw] = await Promise.all([
+  const [campAgg, cmpCampAgg, ga4Camp, cmpGA4Camp, convRows, cmpConvRows, convDaily, campsRaw, cmpConvDaily] = await Promise.all([
     fetchCampAgg(S.start, S.end),
     S.compare && S.cmpStart ? fetchCampAgg(S.cmpStart, S.cmpEnd) : [],
     fetchGA4SessionsByCampaign(S.start, S.end),
@@ -372,6 +377,7 @@ async function tabMeta() {
     S.compare && S.cmpStart ? fetchJusfyConversionsByCampaign(S.cmpStart, S.cmpEnd) : [],
     fetchJusfyConversionsDailyAgg(S.start, S.end),
     fetchCamps(S.start, S.end),
+    S.compare && S.cmpStart ? fetchJusfyConversionsDailyAgg(S.cmpStart, S.cmpEnd) : [],
   ]);
 
   const sessMap    = Object.fromEntries(ga4Camp.map(r => [(r.campaign||'').toLowerCase(), +r.sessions||0]));
@@ -428,7 +434,12 @@ async function tabMeta() {
   const leadsSpendByGroup = dailySpendByGroup(campsRaw.filter(r => isMetaAdsCamp(r) && isLeadsCamp(r)), leadsGroupIdOf);
   const leadsConvByGroup  = dailyLeadsRealConversions(convDaily, leadsAggRaw, 'meta');
 
+  // Linha "Sem campanha identificada" (ver unmatchedRowHtml em utils.js)
+  const unmatched    = unmatchedRealConversions(convDaily, aggRaw, 'meta', 'Meta Ads', campaignLookup);
+  const cmpUnmatched = cmpAggRaw.length ? unmatchedRealConversions(cmpConvDaily, cmpAggRaw, 'meta', 'Meta Ads', campaignLookup) : { total: 0, items: [] };
+
   _metaData = { agg, cmpAgg, cmpMap, hasCmp, dailyChart, spendByDate, channelConvMap,
+    unmatched, cmpUnmatched,
     dailySpendByGroup: spendByGroupMap, dailyConvByGroup: convByGroupMap, allDates,
     leadsAgg, leadsCmpAgg, leadsCmpMap, leadsHasCmp, leadsSpendByGroup, leadsConvByGroup };
 

@@ -408,6 +408,30 @@ function dailyRealConversionsByGroup(convDailyRows, campaignRows, platformKey) {
   return byDate;
 }
 
+// Cadastros que o gráfico/Diário contam no canal (classifyRealConversionChannel, por referral) mas
+// que a tabela de campanhas não consegue atribuir a nenhuma campanha — utm_campaign vazio, macro
+// não resolvido ("{{campaign.name}}"), nome de conjunto/anúncio no lugar do de campanha, campanha
+// sem linha no período (pausada, cadastro veio de clique anterior) ou campanha fora da conta
+// sincronizada. Usa as linhas DIÁRIAS (mesma fonte do gráfico, com tipo_de_trafego/
+// marketing_category e UTM vazio) pra que tabela + esta linha fechem com o total do gráfico.
+// Devolve {total, items:[{utm, clientes}]} (items ordenado do maior pro menor).
+function unmatchedRealConversions(convDailyRows, campaignRows, platformKey, channelLabel, campaignLookup) {
+  const { resolveGroupId } = buildCampaignGroupIndex(campaignRows, platformKey);
+  const byUtm = {};
+  let total = 0;
+  for (const r of convDailyRows || []) {
+    if (classifyRealConversionChannel(r, campaignLookup) !== channelLabel) continue;
+    if (resolveGroupId(r.utm_campaign, r.referral)) continue;
+    const n = +r.clientes_unicos || 0;
+    if (!n) continue;
+    const key = (r.utm_campaign||'').trim() || '(UTM vazio)';
+    byUtm[key] = (byUtm[key] || 0) + n;
+    total += n;
+  }
+  const items = Object.entries(byUtm).map(([utm, clientes]) => ({ utm, clientes })).sort((a,b) => b.clientes - a.clientes);
+  return { total, items };
+}
+
 // Gasto por dia, agrupado pelo mesmo groupId — campaignRows aqui são linhas CRUAS (fetchCamps,
 // uma por dia+campanha), não as agregadas do período usadas em mergeRealConversions.
 function dailySpendByGroup(rawDailyRows, groupIdOf) {
